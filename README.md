@@ -67,4 +67,4 @@ As the user begins to modulate parameters with their hand, JUCE communicates wit
 
 Each component in the system has a clearly defined role: **Python handles the hand-tracking logic**, **JUCE manages the plugin interface and all parameter mapping/effect logic**, **SuperCollider performs the audio synthesis**, and **Processing renders a dynamic, stylized visual representation of the user’s hands**, reacting in real time to both movement and parameter modulation. This modular yet tightly integrated architecture allows for a smooth and expressive performance experience, turning gestures into sound with immediacy and visual feedback.
 
-Made by CallanDragon, Lorenzo Bianco, Alessandro Lillo and FlavioDeLellis
+Made by Pietro Callandrone, Lorenzo Bianco, Alessandro Lillo and Flavio De Lellis
