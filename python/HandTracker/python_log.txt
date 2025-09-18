@@ -1,0 +1,6 @@
+=== Logging initialized ===
+ Python OSC Server listening on port 9002
+Traceback (most recent call last):
+  File "/Users/alessandrolillo/Desktop/CMLS HW/CMLS-Project_Orange-Juce/python/HandTracker/main.py", line 178, in <module>
+    ret, frame = cap.read()
+KeyboardInterrupt
