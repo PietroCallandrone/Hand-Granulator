@@ -853,14 +853,6 @@ void CMProjectAudioProcessorEditor::setToolTipFunction() {
     synthPage->startCamera.setTooltip("Start Camera");
     synthPage->loadSampleButton.setTooltip("Load your sample");
     synthPage->stopCamera.setTooltip("Stop Camera");
-    drumPage->startCamera.setTooltip("Start Camera");
-    drumPage->stopCamera.setTooltip("Stop Camera");
-    synthPage->attackSlider.setTooltip("Attack\n Time to reach peak");
-    synthPage->decaySlider.setTooltip("Decay\n Time to fall to sustain level");
-    synthPage->sustainSlider.setTooltip("Sustain\n Level held until release");
-    synthPage->releaseSlider.setTooltip("Release\n Time to fade out");
-    drumPage->startCamera.setTooltip("Start Camera");
-    drumPage->stopCamera.setTooltip("Stop Camera");
 
 }
 void CMProjectAudioProcessorEditor::pluginTitle() {
