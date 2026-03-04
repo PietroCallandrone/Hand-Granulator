@@ -324,9 +324,6 @@ public:
         addAndMakeVisible(startCamera);
         addAndMakeVisible(stopCamera);
         addAndMakeVisible(loadSampleButton);
-        addAndMakeVisible(recordMidiButton);
-        addAndMakeVisible(stopMidiButton);
-        addAndMakeVisible(saveMidiButton);
         addAndMakeVisible(grainPos);
         addAndMakeVisible(grainDur);
         addAndMakeVisible(grainDensity);
@@ -715,9 +712,6 @@ public:
         startButton.setBounds(80-15, topY-1.3, 28, 30);
         startCamera.setBounds(120-16, topY-1, 46.5f, 30);
         stopCamera.setBounds(180-16, topY-1, 46.5f, 30);
-        recordMidiButton.setBounds(240+416, topY+1, 40, 30);
-        stopMidiButton.setBounds(290+416, topY+1, 40, 30);
-        saveMidiButton.setBounds(340+413, topY+1, 100, 30);
         loadSampleButton.setBounds(40-16, topY+50, 100, 30);
         resetButton.setBounds(132, topY + 50, 80, 30);
         area.removeFromTop(30);
@@ -914,16 +908,8 @@ public:
         }
     }
 
-    void syncBpm(float newBpm)
-    {
-        BPMSlider.setValue(newBpm, juce::dontSendNotification);
-        sendOSC();
-    }
-
 private:
     CMProjectAudioProcessor& processor;
-    juce::Slider BPMSlider;
-    juce::Label grainDurLabel, grainPosLabel, cutoffLabel, bpmLabel;
     juce::Rectangle<int> waveformArea;
     juce::AudioFormatManager formatManager;   // Used to recognize audio formats (.wav, .mp3, etc.)
     juce::AudioThumbnailCache thumbnailCache{ 5 }; // Caches thumbnails for efficiency (5 = number of items)
@@ -988,20 +974,6 @@ private:
         chooser.release();
     }
 
-    // Reserved for future sync logic (currently local-only)
-    void sendOSC()
-    {
-        auto* editor = dynamic_cast<CMProjectAudioProcessorEditor*>(getParentComponent());
-        float bpm = 120.0f;
-        if (editor != nullptr)
-        {
-            auto text = editor->bpmLabel.getText();
-            bpm = text.getFloatValue();
-            processor.setCurrentBpm(bpm);
-   
-        }
-
-    }
 };
 
 class ParameterIconButton : public juce::Button
@@ -1029,422 +1001,8 @@ private:
     
 };
 
-// ==================================================
-// Drum Page Component
-// ==================================================
-
-class CMProjectAudioProcessorEditor::DrumPageComponent : public juce::Component, public juce::Timer
-{
-public:
-    juce::TextButton startCamera, stopCamera;
-    juce::TextButton startDrumsButton, stopDrumsButton; //Start and Stop Drum Buttons
-    juce::OwnedArray<HDImageButton> rowButtons;
-    DrumPageComponent(CMProjectAudioProcessor& p) : processor(p)
-    {
-        startConfiguration(); //function that handles the first drumPage configuration
-        addAndMakeVisibleFunction(); //Function that makes visible all the buttons
-        searchTheKnobImage(); //Function that sets the knob images
-        createTheLoadSamples(); //Function that handles the creation of the grid and the 4 different load sample
-        onClickDrumPage(); //Function that handles the on click functions in the drumPage
-    }
-
-    void addAndMakeVisibleFunction() {
-        addAndMakeVisible(startDrumsButton);
-        addAndMakeVisible(stopDrumsButton);
-        addAndMakeVisible(startCamera);
-        addAndMakeVisible(stopCamera);
-    }
-    void startConfiguration() {
-        startDrumsButton.setButtonText("Start Drums");
-        stopDrumsButton.setButtonText("Stop Drums");
-        startDrumsButton.setLookAndFeel(&startButtonLookAndFeel);
-        stopDrumsButton.setLookAndFeel(&stopButtonLookAndFeel);
-        startDrumsButton.setClickingTogglesState(false);
-        stopDrumsButton.setClickingTogglesState(false);
-        startCamera.setButtonText("Start Camera");
-        stopCamera.setButtonText("Stop Camera");
-        startCamera.setLookAndFeel(&startCameraLookAndFeel);
-        stopCamera.setLookAndFeel(&stopCameraLookAndFeel);
-        stopCamera.setEnabled(false);
-        stopDrumsButton.setEnabled(false);
-    }
-    void searchTheKnobImage() {
-        auto knobFile = SynthPageComponent::getIconFile("realknob.png");
-        if (!knobFile.existsAsFile())
-            DBG("volumeKnob.png not found at: " + knobFile.getFullPathName());
-        else
-        {
-            auto img = juce::ImageFileFormat::loadFrom(knobFile);
-            if (img.isNull())
-                DBG("failed to load volumeKnob.png");
-            else
-                imageKnobLookAndFeel.setKnobImage(img);
-        }
-    }
-    void timerCallback() override
-    {
-        if (!isPlaying)
-            return;
-
-        //Evaluate current step BEFORE advancing
-        for (int track = 0; track < 4; ++track)
-        {
-            if (stepButtons[track]->getUnchecked(currentStep)->getToggleState())
-                processor.triggerSamplePlayback(track);
-        }
-        //Then move to the next step
-        currentStep = (currentStep + 1) % 16;
-    }
-    void createTheLoadSamples() {
-        //Creating the 4 load samples textButtons
-        for (int i = 0; i < 4; ++i)
-        {
-
-            // Add mute button
-            auto* mute = new juce::TextButton("M");
-            mute->setClickingTogglesState(true);
-            mute->setLookAndFeel(&muteLookAndFeel);
-            muteButtons.add(mute);
-            addAndMakeVisible(mute);
-            // Store previous volume value
-            previousVolumes.add(1.0f);
-
-            mute->onClick = [this, i, mute]()
-                {
-                    bool isMuted = mute->getToggleState();
-
-                    if (isMuted)
-                    {
-                        previousVolumes.set(i, volumeSliders[i]->getValue());  // Save current knob
-                        processor.trackVolumes[i] = 0.0f;
-                    }
-                    else
-                    {
-                        processor.trackVolumes[i] = previousVolumes[i];
-                    }
-
-                };
-
-            lights.add(new juce::Component());
-            addAndMakeVisible(lights.getLast());
-
-            auto* button = new juce::TextButton("Load Sample");
-            button->setLookAndFeel(&loadButtonLookAndFeel);
-            loadSampleButtons.add(button);
-            addAndMakeVisible(button);
-
-            loadedSamples.add(juce::File());
-
-            //Make it loaddable
-            loadSampleButtons[i]->onClick = [this, i]() { openFileChooserForTrack(i); };
-
-            //Volume knobs sliders
-            auto* slider = new juce::Slider();
-            slider->setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-            slider->setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
-            slider->setRange(0.0, 1.0, 0.01);
-            slider->setValue(1.0);
-
-            // *** apply your image knob look-and-feel ***
-            slider->setLookAndFeel(&imageKnobLookAndFeel);
-
-            volumeSliders.add(slider);
-            addAndMakeVisible(slider);
-
-            // Connect to processor
-            slider->onValueChange = [this, slider, i]()
-                {
-                    float newVal = (float)slider->getValue(); //get the current value
-                    previousVolumes.set(i, newVal); //remember the last value
-                    if (!muteButtons[i]->getToggleState())
-                        processor.trackVolumes[i] = newVal;
-                };
-        }
-
-        //Create 4 × 4 grid of step buttons
-        for (int track = 0; track < 4; ++track)
-        {
-            auto* row = new juce::OwnedArray<juce::TextButton>();
-            for (int step = 0; step < 16; ++step)
-            {
-                auto* stepBtn = new juce::TextButton();
-                stepBtn->setClickingTogglesState(true);
-                stepBtn->setColour(juce::TextButton::buttonOnColourId, juce::Colours::limegreen.brighter(0.2f)); // toggled-on color
-
-                stepBtn->setLookAndFeel(&roundedLookAndFeel); // <-- this line adds the custom corners
-
-                row->add(stepBtn);
-                addAndMakeVisible(stepBtn);
-            }
-            stepButtons.add(row);
-        }
-
-        for (int r = 0; r < 4; ++r)
-        {
-            auto file = SynthPageComponent::getIconFile("row" + juce::String(r + 1) + ".png");
-            if (!file.existsAsFile()) { DBG("❌ row" << (r + 1) << ".png not found"); continue; }
-
-            auto img = juce::ImageFileFormat::loadFrom(file);
-            auto* btn = new HDImageButton("row" + juce::String(r + 1));
-            btn->setImages(false, true, true,
-                img, 1.0f, {},   // normal
-                img, 0.7f, {},   // over
-                img, 0.5f, {});  // down
-            btn->setClickingTogglesState(true);
-            addAndMakeVisible(btn);
-            rowButtons.add(btn);
-        }
-
-    }
-    void onClickDrumPage() {
-        startDrumsButton.onClick = [this]()
-            {
-                if (!isPlaying)
-                {
-                    stopDrumsButton.setEnabled(true);
-                    startDrumsButton.setEnabled(false);
-                    currentStep = 0;
-                    isPlaying = true;
-                    timerCallback();
-                    auto hz = int((bpm / 60.0f) * 4.0f);
-                    startTimerHz(hz);
-
-                    // 🔁 Set glow ON
-                    startDrumsButton.setToggleState(true, juce::dontSendNotification);
-                    stopDrumsButton.setToggleState(false, juce::dontSendNotification);
-                }
-            };
-
-        stopDrumsButton.onClick = [this]()
-            {
-                if (isPlaying)
-                {
-                    startDrumsButton.setEnabled(true);
-                    stopDrumsButton.setEnabled(false);
-                    isPlaying = false;
-                    stopTimer();
-
-                    // 🔁 Set glow OFF
-                    startDrumsButton.setToggleState(false, juce::dontSendNotification);
-                    stopDrumsButton.setToggleState(false, juce::dontSendNotification);
-                }
-            };
-    }
-
-    void paint(juce::Graphics& g) override
-    {
- 
-        for (int i = 0; i < lights.size(); ++i)
-        {
-            auto* light = lights[i];
-            if (light != nullptr)
-            {
-                auto bounds = light->getBounds().toFloat();
-                auto center = bounds.getCentre();
-                float radius = bounds.getWidth() * 0.5f;
-
-                bool isLoaded = (i < loadedSamples.size() && loadedSamples[i].existsAsFile());
-
-                // Slightly smaller ellipse
-                auto lightBounds = bounds.reduced(3.0f);
-
-                // Light body with soft inner gradient
-                juce::Colour baseColor = isLoaded
-                    ? juce::Colours::limegreen.withBrightness(1.15f)
-                    : juce::Colours::darkgrey.darker(0.7f);
-
-                juce::ColourGradient ballGradient(
-                    baseColor.brighter(0.2f), center.getX(), center.getY() - radius * 0.3f,
-                    baseColor.darker(0.3f), center.getX(), center.getY() + radius * 0.3f,
-                    false
-                );
-
-                g.setGradientFill(ballGradient);
-                g.fillEllipse(lightBounds);
-
-                // Subtle inner glow overlay (no external ring)
-                if (isLoaded)
-                {
-                    g.setColour(juce::Colours::limegreen.withAlpha(0.15f));
-                    g.fillEllipse(lightBounds); // very soft inner aura
-                }
-
-                // Reflection for glassiness
-                auto reflection = lightBounds.reduced(lightBounds.getWidth() * 0.3f, lightBounds.getHeight() * 0.6f)
-                    .withY(lightBounds.getY() + lightBounds.getHeight() * 0.15f);
-                g.setColour(juce::Colours::white.withAlpha(0.15f));
-                g.fillEllipse(reflection);
-            }
-        }
-
-    }
-
-    void resized() override
-    {
-        auto area = getLocalBounds().reduced(20, 10); // 20px left/right, 10px top/bottom
-
-        // Manually place top buttons
-        const int topY = area.getY() - 10;
-
-        int horizontalOffset = -17.2;  // change this to move the whole drum machine rows right or left
-        int verticalOffset = -5.5;  // change this to move the whole drum machine rows up or down
-
-
-        stopDrumsButton.setBounds(40-15, topY-1.3, 30, 30);
-        startDrumsButton.setBounds(80-15, topY-1.3, 28, 30);
-        startCamera.setBounds(120 - 16, topY - 1, 46.5f, 30);
-        stopCamera.setBounds(180 - 16, topY - 1, 46.5f, 30);
-
-        
-        // Push layout area down
-        area.removeFromTop(50);
-
-        const int lightSize = 20;
-        const int lightSpacing = 55;
-
-        // Positioning references
-        const int muteX = 42;
-        const int lightsX = muteX + 55;
-        const int btnX = lightsX + 60;
-        const int btnW = 120, btnH = 30;
-        const int sliderX = btnX + btnW + 30;
-        const int sliderSize = 57;
-        const int sliderYOffset = -19;
-        const int muteYOffset = -3; // mute buttons vertical movement
-
-        for (int i = 0; i < 4; ++i)
-        {
-            int rowY = area.getY() + i * (lightSize + lightSpacing);
-
-            muteButtons[i]->setBounds(muteX + horizontalOffset, rowY + muteYOffset+ verticalOffset, 26, 26);
-
-            lights[i]->setBounds(lightsX + horizontalOffset, rowY+ verticalOffset, lightSize, lightSize);
-
-            loadSampleButtons[i]->setBounds(
-                btnX+ horizontalOffset, rowY - 5 + verticalOffset,
-                btnW, btnH
-            );
-
-            volumeSliders[i]->setBounds(
-                sliderX + horizontalOffset,
-                rowY + sliderYOffset + verticalOffset,
-                sliderSize, sliderSize
-            );
-        }
-
-        //Step sequencer buttons (aligned per row)
-        const int stepWidth = 15; //width of the step
-        const int stepHeight = 24.5; //height of the step
-        const int stepSpacing = 7; //spacing between steps
-        const int stepLeftPadding = 32;
-        const int startX = volumeSliders[0]->getRight() + stepLeftPadding;
-
-        for (int track = 0; track < 4; ++track)
-        {
-            int y = lights[track]->getY() + (lightSize / 2) - (stepHeight / 2);
-
-            for (int step = 0; step < 16; ++step)
-            {
-                int x = startX + step * (stepWidth + stepSpacing);
-                stepButtons[track]->getUnchecked(step)->setBounds(x, y, stepWidth, stepHeight);
-            }
-        }
-        const int numberSize = 50;//number images size
-
-              // compute the total width of our 16-step grid:
-            const int gridWidth = (stepWidth + stepSpacing) * 16 - stepSpacing;
-               // place the row icons just to the right of that:
-            const int numberX = startX + gridWidth + 8;    // 8px padding past grid
-
-        for (int r = 0; r < 4; ++r)
-        {
-            int y = lights[r]->getY() + (lightSize - numberSize) / 2;
-            rowButtons[r]->setBounds(numberX+17.5, y-1.8, numberSize, numberSize);
-        }
-    }
-
-    void syncBpm(float newBpm)
-    {
-        bpm = newBpm;  //store it
-        if (isPlaying)
-        {
-            //for 16th-note grid at N BPM: callbacks per second = (bpm/60)*4
-            auto hz = int((bpm / 60.0f) * 4.0f);
-            startTimerHz(hz);
-        }
-    }
-private:
-
-   
-    juce::OwnedArray<juce::Component> lights; //Lights of the drummachine
-    juce::OwnedArray<juce::TextButton> loadSampleButtons; //The load buttons for the drumMachine
-    juce::Array<juce::File> loadedSamples; //Load arrays for the drum machine
-    juce::OwnedArray<juce::Slider> volumeSliders; //VolumeSliders for the drum machine
-    juce::OwnedArray<juce::TextButton> muteButtons; //Mute BUttons for the drum Machine 
-    juce::Array<float> previousVolumes;  // to remember last knob value
-    RoundedStepLookAndFeel roundedLookAndFeel; //Rounded steps lookandfeel
-    MuteButtonLookAndFeel muteLookAndFeel; //Mute button styled
-    LoadButtonLookAndFeel loadButtonLookAndFeel; //Load Button styled
-    ImageKnobLookAndFeel imageKnobLookAndFeel; //General knob styled
-    StartButtonLookAndFeel startButtonLookAndFeel; //Start Button styled
-    StopButtonLookAndFeel stopButtonLookAndFeel; //Stop Button Styled
-    StartCameraButtonLookAndFeel startCameraLookAndFeel; //Start Camera Styled
-    StopCameraButtonLookAndFeel stopCameraLookAndFeel; //Stop Camera styled
-
-    //2D structure: stepButtons[track][step]
-    juce::OwnedArray<juce::OwnedArray<juce::TextButton>> stepButtons;
-    float bpm = 120.0f;
-    int currentStep = 0;
-    bool isPlaying = false;
-    CMProjectAudioProcessor& processor;
-
-    //Function that truncates the sample name
-    static juce::String truncateWithEllipsis(const juce::String& s, int maxChars)
-    {
-        if (s.length() <= maxChars)
-            return s;
-        //take the first maxChars characters and add “…”
-        return s.substring(0, maxChars) + "...";
-    }
-
-    void openFileChooserForTrack(int trackIndex)
-    {
-        auto* chooser = new juce::FileChooser(
-            "Select a sample",
-            juce::File{},
-            "*.wav;*.aiff;*.flac;*.mp3"
-        );
-
-        chooser->launchAsync(juce::FileBrowserComponent::openMode
-            | juce::FileBrowserComponent::canSelectFiles,
-            [this, trackIndex, chooser](const juce::FileChooser& fc)
-            {
-                auto selectedFile = fc.getResult();
-                if (selectedFile.existsAsFile())
-                {
-                    loadedSamples.set(trackIndex, selectedFile);
-                    lights[trackIndex]->repaint();
-                    processor.loadSampleForTrack(trackIndex, selectedFile);
-
-                    //get the filename
-                    auto fullName = selectedFile.getFileName();
-                    //truncate to first 12 chars 
-                    auto displayName = truncateWithEllipsis(fullName, 14);
-
-                    //set the name on the button
-                    loadSampleButtons[trackIndex]->setButtonText(displayName);
-
-                    //keep the full name as a tooltip on hover
-                    loadSampleButtons[trackIndex]->setTooltip(fullName);
-                }
-                delete chooser;
-            });
-    }
-
-};
-
 //==============================================================================
-// Main GUI container: hosts and switches between synth and drum pages, common both for synth and drums
+// Main GUI container: synth-only UI container
 //==============================================================================
 
 CMProjectAudioProcessorEditor::CMProjectAudioProcessorEditor(CMProjectAudioProcessor& p)
@@ -1458,7 +1016,6 @@ CMProjectAudioProcessorEditor::CMProjectAudioProcessorEditor(CMProjectAudioProce
     pluginTitle(); //function that sets the plugin title
     setToolTipFunction(); //Function that handles all the toolTip functions for both Synth and Drum page
     addListenerToGLobal(); //function that sets all the addListeners
-    globalBpmSetUp(); //Function that handles the global bpm setup
     fingersSetUp(); //Function that setUps the fingers
     setSize(950, 750); //Total size of the plugin
     startTimerHz(60); //starting camerapython timer
@@ -1474,10 +1031,7 @@ CMProjectAudioProcessorEditor::~CMProjectAudioProcessorEditor()
         synthPage->stopCamera.removeListener(this);
         synthPage->startButton.removeListener(this);
         synthPage->stopButton.removeListener(this);
-        drumPage->startCamera.removeListener(this);
-        drumPage->stopCamera.removeListener(this);
         synthPage->resetButton.removeListener(this);
-        switchButton.removeListener(this);
         indexButton.removeListener(this);
         middleButton.removeListener(this);
         ringButton.removeListener(this);
@@ -1487,24 +1041,15 @@ CMProjectAudioProcessorEditor::~CMProjectAudioProcessorEditor()
         middleLeftButton.removeListener(this);
         clearLookAndFeelRecursively (this);
         
-        // Now safe to delete
-        delete drumPage;
         delete synthPage;
 }
 
 void CMProjectAudioProcessorEditor::startingConfigurationGlobal() {
     synthPage = new SynthPageComponent(audioProcessor);
-    drumPage = new DrumPageComponent(audioProcessor);
     background = std::make_unique<GridBackgroundComponent>();
     addAndMakeVisible(background.get()); //comes before anything else
 
     addAndMakeVisible(synthPage);
-    addAndMakeVisible(drumPage);
-    drumPage->setVisible(false);
-    addAndMakeVisible(switchButton);
-    switchButton.setButtonText("Switch Page");
-    switchButton.setColour(juce::TextButton::buttonColourId, juce::Colour::fromFloatRGBA(0.22f, 0.22f, 0.22f, 0.75f));
-    switchButton.setColour(juce::TextButton::textColourOffId, juce::Colours::lightgrey.withAlpha(0.8f));
 }
 void CMProjectAudioProcessorEditor::setToolTipFunction() {
 
@@ -1518,17 +1063,12 @@ void CMProjectAudioProcessorEditor::setToolTipFunction() {
     synthPage->startButton.setTooltip("Start Button");
     synthPage->stopButton.setTooltip("Stop Button");
     synthPage->startCamera.setTooltip("Start Camera");
-    synthPage->recordMidiButton.setTooltip("Start Midi recording");
-    synthPage->stopMidiButton.setTooltip("Stop Midi recording");
-    synthPage->saveMidiButton.setTooltip("Save Midi recording");
     synthPage->loadSampleButton.setTooltip("Load your sample");
     synthPage->stopCamera.setTooltip("Stop Camera");
     synthPage->attackSlider.setTooltip("Attack\n Time to reach peak");
     synthPage->decaySlider.setTooltip("Decay\n Time to fall to sustain level");
     synthPage->sustainSlider.setTooltip("Sustain\n Level held until release");
     synthPage->releaseSlider.setTooltip("Release\n Time to fade out");
-    drumPage->startCamera.setTooltip("Start Camera");
-    drumPage->stopCamera.setTooltip("Stop Camera");
 
 }
 void CMProjectAudioProcessorEditor::pluginTitle() {
@@ -1636,54 +1176,13 @@ void CMProjectAudioProcessorEditor::loadHandiImageFromPath() {
     }
 
 }
-void CMProjectAudioProcessorEditor::globalBpmSetUp() {
-    //Setting values for the global bpm
-    bpmLabel.setEditable(true, true, false);
-    bpmLabel.setText("120", juce::dontSendNotification);
-    bpmLabel.setFont(juce::Font(16.0f, juce::Font::bold));
-    bpmLabel.setJustificationType(juce::Justification::centred);
-    bpmLabel.setWantsKeyboardFocus(true); // Ensure it can receive focus
-    //bpmLabel.addMouseListener(this, true); // Make this component listen to mouse events
-
-    //syncronyze bpm
-    bpmLabel.onTextChange = [this]()
-        {
-            auto text = bpmLabel.getText();
-            if (!text.containsOnly("0123456789.")) //allow only digits and decimal point
-            {
-                statusDisplay.showMessage("Invalid BPM!");
-                bpmLabel.setText("120", juce::dontSendNotification); //reset to default or previous value
-                return;
-            }
-            auto bpm = text.getFloatValue();
-
-            if (bpm >= 1.0f && bpm <= 300.0f)
-            {
-                synthPage->syncBpm(bpm);
-                drumPage->syncBpm(bpm);
-                statusDisplay.showMessage("BPM updated!");
-            }
-            else {
-                statusDisplay.showMessage("Invalid BPM!");
-                bpmLabel.setText("120", juce::dontSendNotification); //reset to default or previous value
-                return;
-            }
-        };
-
-    addAndMakeVisible(bpmLabel);
-}
 void CMProjectAudioProcessorEditor::addListenerToGLobal() {
-    switchButton.addListener(this);
     synthPage->startCamera.addListener(this);
     synthPage->stopCamera.addListener(this);
     synthPage->startButton.addListener(this);
     synthPage->stopButton.addListener(this);
     synthPage->resetButton.addListener(this);
 
-    drumPage->startDrumsButton.addListener(this);
-    drumPage->stopDrumsButton.addListener(this);
-    drumPage->startCamera.addListener(this);
-    drumPage->stopCamera.addListener(this);
 
     synthPage->grainPos.addListener(this);
     synthPage->grainDur.addListener(this);
@@ -1693,39 +1192,25 @@ void CMProjectAudioProcessorEditor::addListenerToGLobal() {
     synthPage->grainCutOff.addListener(this);
     synthPage->lfoRate.addListener(this);
 
-    for (auto* btn : drumPage->rowButtons)
-        btn->addListener(this);
 
 }
 void CMProjectAudioProcessorEditor::paint(juce::Graphics&) {}
 void CMProjectAudioProcessorEditor::resized()
 {
-    auto forstartsbound = getLocalBounds().reduced(20, 10);
-    const int topY = forstartsbound.getY() - 10;
-    startAllButton.setBounds(180 + 45, topY + 39, 80, 30);
-   
-
     if (background)
         background->setBounds(getLocalBounds());
 
     auto fullArea = getLocalBounds();
 
     auto areas = getLocalBounds(); //the whole plugin window
-    const int btnW = 100; // same width
-    const int btnH = 50; //same height
-    const int margin = 10; //keep it off the very edge
-    int x = areas.getRight() - btnW - margin; //right side
-    int y = (areas.getHeight() - btnH) / 2; //vertical center
-    switchButton.setBounds(x-9, y-260, 100, 30);
+    juce::ignoreUnused(areas);
 
-    auto bpmBar = fullArea.removeFromTop(40); //reduce vertical space
-    bpmLabel.setBounds(getWidth() - 200, 25, 70, 24);
-
-    //displace the label and the BPM write
-    bpmTitleLabel.setBounds(getWidth() - 124, 24, 40, 26);
-    bpmLabel.setBounds(getWidth() - 90, 43, 70, 27.5);
     synthPage->setBounds(fullArea);
-    drumPage->setBounds(fullArea);
+
+    // Keep Start All aligned with the synth transport row.
+    const int startAllX = synthPage->stopCamera.getRight() + 12;
+    const int startAllY = synthPage->startButton.getY();
+    startAllButton.setBounds(startAllX, startAllY, 100, 30);
 
     handOverlay.setBounds(65, 380, 800, 350); //Hands dimension and displacement
 
@@ -1790,76 +1275,13 @@ void CMProjectAudioProcessorEditor::resized()
 void CMProjectAudioProcessorEditor::mouseWheelMove(const juce::MouseEvent& e,
     const juce::MouseWheelDetails& wheel)
 {
-    if (bpmLabel.getBounds().contains(e.getPosition()))
-    {
-        float bpm = bpmLabel.getText().getFloatValue();
-
-        // use deltaY (positive = wheel up, negative = down)
-        bpm += wheel.deltaY;
-
-        bpm = juce::jlimit(1.0f, 999.0f, bpm);
-        bpmLabel.setText(juce::String(bpm, 1), juce::dontSendNotification);
-
-        synthPage->syncBpm(bpm);
-        drumPage->syncBpm(bpm);
-        statusDisplay.showMessage("BPM set to " + juce::String(bpm, 1));
-    }
-    else
-    {
-        Component::mouseWheelMove(e, wheel);
-    }
+    Component::mouseWheelMove(e, wheel);
 }
 
 
 
 void CMProjectAudioProcessorEditor::buttonClicked(juce::Button* button)
 {
-    for (int r = 0; r < drumPage->rowButtons.size(); ++r)
-    {
-        if (button == drumPage->rowButtons[r])
-        {
-            setCurrentParameter(juce::String(r));
-            currentParameterIcon = drumPage->rowButtons[r]->getNormalImage();
-            statusDisplay.showMessage(currentParameter);
-            return;
-        }
-    }
-    // Handle page switching
-    if (button == &switchButton)
-    {
-        showingSynth = !showingSynth;
-        synthPage->setVisible(showingSynth);
-        drumPage->setVisible(!showingSynth);
-        
-        //Set the correct page for Python
-        currentPage = showingSynth ? "synth" : "drum";
-        
-        if(isPythonOn)
-        {
-            audioProcessor.senderToPython.send("/activePage", currentPage);
-        }
-        
-        currentParameter.clear();
-        
-        //Hide glow images when Drum page is shown
-        indexGlow.setVisible(showingSynth);
-        middleGlow.setVisible(showingSynth);
-        ringGlow.setVisible(showingSynth);
-        pinkyGlow.setVisible(showingSynth);
-
-        //hide the correct fingers for drumpage and for synthpage
-        indexButton.setVisible(showingSynth);
-        middleButton.setVisible(showingSynth);
-        ringButton.setVisible(showingSynth);
-        pinkyButton.setVisible(showingSynth);
-        lfoParamButton.setVisible(showingSynth);
-        indexLeftButton.setVisible(!showingSynth);
-        middleLeftButton.setVisible(!showingSynth);
-        indexRightButton.setVisible(!showingSynth);
-        middleRightButton.setVisible(!showingSynth);
-        audioProcessor.processingSender.send("/activePage", currentPage);
-    }
-
     if (button == &synthPage->resetButton)
     {
         if (!isPythonOn)
@@ -1868,7 +1290,6 @@ void CMProjectAudioProcessorEditor::buttonClicked(juce::Button* button)
             return;
         }
 
-        // Send a reset request to Python
         audioProcessor.senderToPython.send("/resetParameters");
         statusDisplay.showMessage("Resetting parameters!");
         return;
@@ -1878,64 +1299,53 @@ void CMProjectAudioProcessorEditor::buttonClicked(juce::Button* button)
     {
         if (startAllButton.getToggleState())
         {
-            
-            //start synth & drums
-            if (synthPage->startButton.isEnabled() && drumPage->startDrumsButton.isEnabled()) {
+            if (synthPage->startButton.isEnabled())
+            {
                 synthPage->startButton.triggerClick();
-                drumPage->startDrumsButton.triggerClick();
                 synthPage->stopButton.setEnabled(false);
-                drumPage->stopDrumsButton.setEnabled(false);
-                statusDisplay.showMessage("Synth + Drums Started");
+                statusDisplay.showMessage("Synth Started");
             }
             else
                 statusDisplay.showMessage("Something already playing!");
         }
         else
         {
-            //stop synth & drums
-            if (synthPage->stopButton.isEnabled() && drumPage->stopDrumsButton.isEnabled()) {
+            if (synthPage->stopButton.isEnabled())
+            {
                 synthPage->stopButton.triggerClick();
-                drumPage->stopDrumsButton.triggerClick();
                 synthPage->startButton.setEnabled(true);
-                drumPage->startDrumsButton.setEnabled(true);
-                statusDisplay.showMessage("Synth + Drums Stopped");
+                statusDisplay.showMessage("Synth Stopped");
             }
             else
                 statusDisplay.showMessage("can't do this!");
         }
         return;
     }
-    if (startAllButton.getToggleState())
-         {
-        if (button == &synthPage->stopButton
-             || button == &drumPage->stopDrumsButton)
-             {  
-                return; //“all or nothing” mode
-            }
-        }
-    //Handle camera controls
-    else if (button == &synthPage->startCamera || button == &drumPage->startCamera)
+
+    if (startAllButton.getToggleState() && button == &synthPage->stopButton)
+        return;
+
+    if (button == &synthPage->startCamera)
     {
         launchPythonHandTracker();
         synthPage->startCamera.setEnabled(false);
         synthPage->stopCamera.setEnabled(true);
-        drumPage->startCamera.setEnabled(false);
-        drumPage->stopCamera.setEnabled(true);
         statusDisplay.showMessage("Camera Started");
         isPythonOn = true;
+        return;
     }
-    else if (button == &synthPage->stopCamera || button == &drumPage->stopCamera)
+
+    if (button == &synthPage->stopCamera)
     {
         isPythonOn = false;
         stopPythonHandTracker();
         synthPage->startCamera.setEnabled(true);
         synthPage->stopCamera.setEnabled(false);
-        drumPage->startCamera.setEnabled(true);
-        drumPage->stopCamera.setEnabled(false);
         statusDisplay.showMessage("Camera Stopped");
+        return;
     }
-    //Handle start/stop sound
-    else if (button == &synthPage->startButton)
+
+    if (button == &synthPage->startButton)
     {
         synthPage->startButton.setEnabled(false);
         synthPage->stopButton.setEnabled(true);
@@ -1946,7 +1356,6 @@ void CMProjectAudioProcessorEditor::buttonClicked(juce::Button* button)
         synthPage->stopButton.setEnabled(false);
     }
 
-    //Handle parameter selection
     if (button == &synthPage->grainPos)
     {
         setCurrentParameter("GrainPos");
@@ -1985,333 +1394,129 @@ void CMProjectAudioProcessorEditor::buttonClicked(juce::Button* button)
     }
 
     auto isAlreadyAssigned = [&](const juce::String& param) -> bool
-        {
-            for (int i = 0; i < 4; ++i)
-                if (audioProcessor.fingerControls[i] == param)
-                    return true;
-            return false;
-        };
+    {
+        for (int i = 0; i < 4; ++i)
+            if (audioProcessor.fingerControls[i] == param)
+                return true;
+        return false;
+    };
 
-    auto isDrumAlreadyAssigned = [&](const juce::String& param) -> bool
-        {
-            for (int i = 0; i < 4; ++i)
-                if (audioProcessor.fingerDrumMapping[i] == param)
-                    return true;
-            return false;
-        };
-    //Ensure only one finger is assigned to each parameter
     auto ensureUniqueAssignment = [this](int fingerIndex)
-        {
-            for (int i = 0; i < 4; ++i)
-            {
-                if (i != fingerIndex && audioProcessor.fingerControls[i] == currentParameter)
-                    audioProcessor.fingerControls[i] = "";
-            }
-            audioProcessor.senderToPython.send("/activePage", currentPage);
-            audioProcessor.fingerControls[fingerIndex] = currentParameter;
-            audioProcessor.sendFingerAssignementsOSC();
-        };
+    {
+        for (int i = 0; i < 4; ++i)
+            if (i != fingerIndex && audioProcessor.fingerControls[i] == currentParameter)
+                audioProcessor.fingerControls[i] = "";
 
-    auto ensureDrumUniqueAssignment = [this](int fingerIndex)
-        {
-            //  duplicati
-            for (int i = 0; i < 4; ++i) {
+        audioProcessor.senderToPython.send("/activePage", currentPage);
+        audioProcessor.fingerControls[fingerIndex] = currentParameter;
+        audioProcessor.sendFingerAssignementsOSC();
+    };
 
-                if (i != fingerIndex && audioProcessor.fingerDrumMapping[i] == currentParameter)
-                    audioProcessor.fingerDrumMapping[i] = "";
-
-            }
-            //  salva l’indice di sample 
-            juce::String( sampleIndex) = currentParameter;
-            audioProcessor.senderToPython.send("/activePage", currentPage);
-            audioProcessor.fingerDrumMapping[fingerIndex] = sampleIndex;
-
-            // Python
-            audioProcessor.sendFingerDrumMappingOSC();
-        };
-
-    //Handle fingers assignment
     if (button == &indexButton)
     {
-        if (isPythonOn == false)
-        {
-            statusDisplay.showMessage("Open Camera first");
-            return;
-        }
-        
-        if (currentParameter.isEmpty())
-            {
-                statusDisplay.showMessage("Select a parameter");
-                return;
-            }
-        
-        if (isAlreadyAssigned(currentParameter))
-        {
-            statusDisplay.showMessage(currentParameter + " is already mapped!");
-            return;
-        }
-            ensureUniqueAssignment(0);
-            indexButton.setIconImage(currentParameterIcon);
-            indexButton.setTooltip(currentParameter);
-            statusDisplay.showMessage("Index->" + currentParameter);
-            assignGlowToFinger(currentParameter, indexGlow, { 591, 330 }, 20.0f, 73, 73); //+x to the righ, +y to go down
-            audioProcessor.processingSender.send("/fingers_proc", 1);
-    }
+        if (!isPythonOn) { statusDisplay.showMessage("Open Camera first"); return; }
+        if (currentParameter.isEmpty()) { statusDisplay.showMessage("Select a parameter"); return; }
+        if (isAlreadyAssigned(currentParameter)) { statusDisplay.showMessage(currentParameter + " is already mapped!"); return; }
 
-    if (button == &indexRightButton)
-    {
-        if (isPythonOn == false)
-        {
-            statusDisplay.showMessage("Open Camera first");
-            return;
-        }
-        
-        if (currentParameter.isEmpty())
-            {
-                statusDisplay.showMessage("Select a parameter");
-                return;
-            }
-        
-        if (isDrumAlreadyAssigned(currentParameter))
-        {
-            statusDisplay.showMessage(currentParameter + " is already mapped!");
-            return;
-        }
-
-        ensureDrumUniqueAssignment(0);
-        indexRightButton.setIconImage(currentParameterIcon);
-        indexRightButton.setTooltip(currentParameter);
+        ensureUniqueAssignment(0);
+        indexButton.setIconImage(currentParameterIcon);
+        indexButton.setTooltip(currentParameter);
         statusDisplay.showMessage("Index->" + currentParameter);
-        assignGlowToFinger(currentParameter, indexGlow, { 591, 330 }, 20.0f, 73, 73); //+x to the righ, +y to go down
-        audioProcessor.processingSender.send("/fingers_proc", 7);
+        assignGlowToFinger(currentParameter, indexGlow, { 591, 330 }, 20.0f, 73, 73);
+        audioProcessor.processingSender.send("/fingers_proc", 1);
     }
-
     else if (button == &middleButton)
     {
-        if (isPythonOn == false)
-        {
-            statusDisplay.showMessage("Open Camera first");
-            return;
-        }
-        
-        if (currentParameter.isEmpty())
-            {
-                statusDisplay.showMessage("Select a parameter");
-                return;
-            }
-        
-        if (isAlreadyAssigned(currentParameter))
-        {
-            statusDisplay.showMessage(currentParameter + " is already mapped!");
-            return;
-        }
+        if (!isPythonOn) { statusDisplay.showMessage("Open Camera first"); return; }
+        if (currentParameter.isEmpty()) { statusDisplay.showMessage("Select a parameter"); return; }
+        if (isAlreadyAssigned(currentParameter)) { statusDisplay.showMessage(currentParameter + " is already mapped!"); return; }
+
         ensureUniqueAssignment(1);
         middleButton.setIconImage(currentParameterIcon);
         middleButton.setTooltip(currentParameter);
         statusDisplay.showMessage("Middle->" + currentParameter);
-        assignGlowToFinger(currentParameter, middleGlow, { 532, 316 }, 6.0f, 72, 72); //+x to the righ, +y to go down
+        assignGlowToFinger(currentParameter, middleGlow, { 532, 316 }, 6.0f, 72, 72);
         audioProcessor.processingSender.send("/fingers_proc", 2);
-    }
-
-    else if (button == &middleRightButton)
-    {
-        if (isPythonOn == false)
-        {
-            statusDisplay.showMessage("Open Camera first");
-            return;
-        }
-        
-        if (currentParameter.isEmpty())
-            {
-                statusDisplay.showMessage("Select a parameter");
-                return;
-            }
-        
-        if (isDrumAlreadyAssigned(currentParameter))
-        {
-            statusDisplay.showMessage(currentParameter + " is already mapped!");
-            return;
-        }
-        ensureDrumUniqueAssignment(1);
-        middleRightButton.setIconImage(currentParameterIcon);
-        middleRightButton.setTooltip(currentParameter);
-        statusDisplay.showMessage("Middle->" + currentParameter);
-        assignGlowToFinger(currentParameter, middleGlow, { 532, 316 }, 6.0f, 72, 72); //+x to the righ, +y to go down
-        audioProcessor.processingSender.send("/fingers_proc", 8);
     }
     else if (button == &ringButton)
     {
-        if (isPythonOn == false)
-        {
-            statusDisplay.showMessage("Open Camera first");
-            return;
-        }
-        
-        if (currentParameter.isEmpty())
-            {
-                statusDisplay.showMessage("Select a parameter");
-                return;
-            }
-        
-        if (isAlreadyAssigned(currentParameter))
-        {
-            statusDisplay.showMessage(currentParameter + " is already mapped!");
-            return;
-        }
+        if (!isPythonOn) { statusDisplay.showMessage("Open Camera first"); return; }
+        if (currentParameter.isEmpty()) { statusDisplay.showMessage("Select a parameter"); return; }
+        if (isAlreadyAssigned(currentParameter)) { statusDisplay.showMessage(currentParameter + " is already mapped!"); return; }
 
         ensureUniqueAssignment(2);
         ringButton.setIconImage(currentParameterIcon);
         ringButton.setTooltip(currentParameter);
         statusDisplay.showMessage("Ring->" + currentParameter);
-        assignGlowToFinger(currentParameter, ringGlow, { 474, 331 }, -10.0f, 72, 72); //+x to the righ, +y to go down
+        assignGlowToFinger(currentParameter, ringGlow, { 474, 331 }, -10.0f, 72, 72);
         audioProcessor.processingSender.send("/fingers_proc", 3);
-
     }
     else if (button == &pinkyButton)
     {
-        if (isPythonOn == false)
-        {
-            statusDisplay.showMessage("Open Camera first");
-            return;
-        }
-        
-        if (currentParameter.isEmpty())
-            {
-                statusDisplay.showMessage("Select a parameter");
-                return;
-            }
-        
-        if (isAlreadyAssigned(currentParameter))
-        {
-            statusDisplay.showMessage(currentParameter + " is already mapped!");
-            return;
-        }
+        if (!isPythonOn) { statusDisplay.showMessage("Open Camera first"); return; }
+        if (currentParameter.isEmpty()) { statusDisplay.showMessage("Select a parameter"); return; }
+        if (isAlreadyAssigned(currentParameter)) { statusDisplay.showMessage(currentParameter + " is already mapped!"); return; }
+
         ensureUniqueAssignment(3);
         pinkyButton.setIconImage(currentParameterIcon);
         pinkyButton.setTooltip(currentParameter);
         statusDisplay.showMessage("Pinky->" + currentParameter);
-        assignGlowToFinger(currentParameter, pinkyGlow, { 437, 382 }, -25.0f, 68, 68); //+x to the righ, +y to go down
+        assignGlowToFinger(currentParameter, pinkyGlow, { 437, 382 }, -25.0f, 68, 68);
         audioProcessor.processingSender.send("/fingers_proc", 4);
+    }
+    else if (button == &lfoParamButton)
+    {
+        if (currentParameter.isEmpty()) { statusDisplay.showMessage("Select a parameter"); return; }
+        if (currentParameter == "lfoRate") { statusDisplay.showMessage("Can't assign LFO Rate"); return; }
 
-    }
-    else if (button == &indexLeftButton)
-    {
-        if (!isPythonOn) { statusDisplay.showMessage("Open Camera first"); return; }
-        
-        if (currentParameter.isEmpty())
-            {
-                statusDisplay.showMessage("Select a parameter");
-                return;
-            }
-        
-        if (isDrumAlreadyAssigned(currentParameter)) { statusDisplay.showMessage(currentParameter + " is already mapped!"); return; }
-
-        ensureDrumUniqueAssignment(2);
-        indexLeftButton.setIconImage(currentParameterIcon);
-        indexLeftButton.setTooltip(currentParameter);
-        statusDisplay.showMessage("Left-Index" + currentParameter);
-        audioProcessor.processingSender.send("/fingers_proc", 5);
-    }
-    else if (button == &middleLeftButton)
-    {
-        if (!isPythonOn) { statusDisplay.showMessage("Open Camera first"); return; }
-        
-        if (currentParameter.isEmpty())
-            {
-                statusDisplay.showMessage("Select a parameter");
-                return;
-            }
-        
-        if (isDrumAlreadyAssigned(currentParameter)) { statusDisplay.showMessage(currentParameter + " is already mapped!"); return; }
-        ensureDrumUniqueAssignment(3);
-        middleLeftButton.setIconImage(currentParameterIcon);
-        middleLeftButton.setTooltip(currentParameter);
-        statusDisplay.showMessage("Left-Middle " + currentParameter);
-        audioProcessor.processingSender.send("/fingers_proc", 6);
-    }
-    else if(button == &lfoParamButton)
-    {
-        
-        if (currentParameter.isEmpty())
-            {
-                statusDisplay.showMessage("Select a parameter");
-                return;
-            }
-        
-        if(currentParameter == "lfoRate")
-        {
-            statusDisplay.showMessage("Can't assign LFO Rate");
-            return;
-        }
         lfoParamButton.setIconImage(currentParameterIcon);
         lfoParamButton.setTooltip(currentParameter);
         statusDisplay.showMessage("LFO->" + currentParameter);
         synthPage->isLfoActive = true;
         synthPage->repaint();
-
     }
     else if (button == &clearFingersButton)
     {
-        if (isPythonOn == false) //Avoid to send messages if camera is off
+        if (!isPythonOn)
         {
             statusDisplay.showMessage("Open Camera first");
             return;
         }
 
-        //clear each CircleButton visually
         auto clearCircle = [](CircleButton& btn)
-            {
-                btn.setIconImage(juce::Image());  //remove icon
-                btn.repaint(); //repaint
-                btn.setTooltip({});//clear tooltip
-            };
-
-        if (showingSynth)
         {
-            //clear in the audioProcessor state
-            for (int i = 0; i < 4; ++i)
-                audioProcessor.fingerControls[i].clear();
-            audioProcessor.sendFingerAssignementsOSC();  //push empty assignments
+            btn.setIconImage(juce::Image());
+            btn.repaint();
+            btn.setTooltip({});
+        };
 
-            clearCircle(indexButton);
-            clearCircle(middleButton);
-            clearCircle(ringButton);
-            clearCircle(pinkyButton);
-            clearCircle(lfoParamButton);
-            audioProcessor.processingSender.send("/clearSynth");
-            //clear also the glow effect
-            auto clearGlow = [this](juce::ImageComponent& glow)
-                {
-                    glow.setVisible(false);
-                    glow.setImage(juce::Image(), juce::RectanglePlacement::centred);
+        for (int i = 0; i < 4; ++i)
+            audioProcessor.fingerControls[i].clear();
+        audioProcessor.sendFingerAssignementsOSC();
 
-                };
+        clearCircle(indexButton);
+        clearCircle(middleButton);
+        clearCircle(ringButton);
+        clearCircle(pinkyButton);
+        clearCircle(lfoParamButton);
+        audioProcessor.processingSender.send("/clearSynth");
 
-            clearGlow(indexGlow);
-            clearGlow(middleGlow);
-            clearGlow(ringGlow);
-            clearGlow(pinkyGlow);
-            synthPage->isLfoActive = false;
-            synthPage->repaint();
-
-
-        }
-        else  //drum page
+        auto clearGlow = [this](juce::ImageComponent& glow)
         {
-            for (int i = 0; i < 4; ++i)
-                audioProcessor.fingerDrumMapping[i].clear(); //becomes ""
-            audioProcessor.sendFingerDrumMappingOSC();  //sends fingers updated
-            audioProcessor.processingSender.send("/clearDrum");
-            clearCircle(indexRightButton);
-            clearCircle(middleRightButton);
-            clearCircle(indexLeftButton);
-            clearCircle(middleLeftButton);
-        }
+            glow.setVisible(false);
+            glow.setImage(juce::Image(), juce::RectanglePlacement::centred);
+        };
+
+        clearGlow(indexGlow);
+        clearGlow(middleGlow);
+        clearGlow(ringGlow);
+        clearGlow(pinkyGlow);
+        synthPage->isLfoActive = false;
+        synthPage->repaint();
+
         statusDisplay.showMessage("Finger mappings cleared");
     }
-
 }
-
 
 //==============================================================================
 //PYTHON PROCESS//
@@ -2449,9 +1654,9 @@ void CMProjectAudioProcessorEditor::timerCallback()
         cameraRunning = false;
         synthPage->startCamera.setEnabled(true);
         synthPage->stopCamera.setEnabled(false);
-        drumPage->startCamera.setEnabled(true);
-        drumPage->stopCamera.setEnabled(false);
         isPythonOn = false;
     }
 }
+
+
 

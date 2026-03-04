@@ -80,49 +80,6 @@ struct LoadButtonLookAndFeel : public juce::LookAndFeel_V4
     }
 };
 
-// Custom styled label used for BPM
-class CustomBpmLabel : public juce::Label
-{
-public:
-    CustomBpmLabel() = default;
-
-    void paint(juce::Graphics& g) override
-    {
-        auto bounds = getLocalBounds().toFloat();
-
-        g.setColour(juce::Colour::fromFloatRGBA(0.22f, 0.22f, 0.22f, 0.75f)); // same as your button color
-        g.fillRoundedRectangle(bounds, 6.0f);
-
-        g.setColour(juce::Colours::lightgrey.withAlpha(0.85f));
-        g.setFont(juce::Font(14.5f, juce::Font::bold));
-        g.drawFittedText(getText(), getLocalBounds(), juce::Justification::centred, 1);
-    }
-
-    juce::TextEditor* createEditorComponent() override
-    {
-        auto* editor = new juce::TextEditor();
-
-        editor->setJustification(juce::Justification::centred);
-        editor->setFont(juce::Font(14.5f, juce::Font::bold));
-
-        // Match the static look
-        editor->setColour(juce::TextEditor::backgroundColourId, juce::Colour::fromFloatRGBA(0.22f, 0.22f, 0.22f, 0.75f));
-        editor->setColour(juce::TextEditor::textColourId, juce::Colours::lightgrey.withAlpha(0.85f));
-        editor->setColour(juce::TextEditor::outlineColourId, juce::Colours::transparentBlack);
-        editor->setColour(juce::TextEditor::focusedOutlineColourId, juce::Colours::transparentBlack);
-        editor->setColour(juce::TextEditor::highlightColourId, juce::Colours::transparentBlack);
-
-        editor->setBorder(juce::BorderSize<int>(0));
-        editor->setScrollbarsShown(false);
-        editor->setIndents(0, 0);
-
-        editor->setSize(getWidth(), getHeight()); // force matching size
-
-        return editor;
-    }
-
-};
-
 class CMProjectAudioProcessorEditor : public juce::AudioProcessorEditor,
     private juce::Button::Listener, private juce::Timer, public juce::MouseListener
 {
@@ -136,8 +93,6 @@ public:
     void resized() override;
     void mouseWheelMove(const juce::MouseEvent& e,
         const juce::MouseWheelDetails& wheel) override;
-    CustomBpmLabel bpmLabel;
-    juce::Label bpmTitleLabel;
     GlossyTitleLabel pageTitleLabel;
 
 
@@ -150,7 +105,6 @@ public:
     void midiOnClickSetUpFunction();
     void clearFingersStartAllSetUp();
     void startingConfigurationGlobal();
-    void globalBpmSetUp();
     void addListenerToGLobal();
     juce::TextButton clearFingersButton{ "Clear Fingers" };
     //HDImageButton rowIcon[4];
@@ -159,14 +113,12 @@ public:
 private:
 
     class SynthPageComponent;
-    class DrumPageComponent;
     LoadButtonLookAndFeel startAllButtonLookAndFeel;
     LoadButtonLookAndFeel clearFingerButtonLookAndFeel;
     std::unique_ptr<GridBackgroundComponent> background;
     CMProjectAudioProcessor& audioProcessor;
     juce::ImageComponent handOverlay;
     SynthPageComponent* synthPage = nullptr;
-    DrumPageComponent* drumPage = nullptr;
     juce::TooltipWindow tooltipWindow{ this, 300 /* delay in ms */ }; //OnMousePointed
     juce::TextButton startAllButton{ "Start All" };
     
@@ -184,48 +136,6 @@ private:
         }
     }
 
-
-    //full function to style the switch page
-    class ShadowedTextButton : public juce::TextButton
-    {
-    public:
-        ShadowedTextButton(const juce::String& name) : juce::TextButton(name) {}
-
-        void paintButton(juce::Graphics& g, bool isMouseOver, bool isButtonDown) override
-        {
-            auto bounds = getLocalBounds().toFloat().reduced(1.0f);
-            juce::Colour base = juce::Colour::fromFloatRGBA(0.22f, 0.22f, 0.22f, 0.75f);
-            if (isMouseOver) base = base.brighter(0.1f);
-            if (isButtonDown) base = base.darker(0.1f);
-            g.setColour(base);
-            g.fillRoundedRectangle(bounds, 6.0f);
-            juce::Rectangle<float> gloss(bounds.withHeight(bounds.getHeight() * 0.35f));
-            juce::ColourGradient glossGradient(
-                juce::Colours::white.withAlpha(0.05f),
-                gloss.getCentreX(), gloss.getY(),
-                juce::Colours::transparentBlack,
-                gloss.getCentreX(), gloss.getBottom(),
-                false
-            );
-            g.setGradientFill(glossGradient);
-            g.fillRoundedRectangle(gloss, 6.0f);
-
-            juce::Font font(14.0f, juce::Font::bold);
-            g.setFont(font);
-            auto text = getButtonText();
-            auto textBounds = getLocalBounds();
-
-            g.setColour(juce::Colours::black.withAlpha(0.4f));
-            g.drawFittedText(text, textBounds.translated(1, 1), juce::Justification::centred, 1);
-
-            g.setColour(juce::Colours::lightgrey.withAlpha(0.8f));
-            g.drawFittedText(text, textBounds, juce::Justification::centred, 1);
-        }
-    };
-
-    ShadowedTextButton switchButton{ "Switch Page" };
-
-    bool showingSynth = true;
     juce::String currentPage = "synth";
     bool cameraRunning = false;
 
@@ -518,7 +428,7 @@ private:
         void drawButtonText(juce::Graphics&, juce::TextButton&, bool, bool) override {}
     };
 
-    //Mute button for the drumPage
+    // Mute button style
     struct MuteButtonLookAndFeel : public juce::LookAndFeel_V4
     {
         void drawButtonBackground(juce::Graphics& g, juce::Button& button,
@@ -771,4 +681,3 @@ private:
 
  
 };
-

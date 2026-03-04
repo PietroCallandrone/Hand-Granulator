@@ -309,7 +309,7 @@ void CMProjectAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juc
         const int sourceChannels = synthSample.getNumChannels();
 
         const float densityValue = juce::jmax(0.01f, density.load());
-        const double bpm = juce::jmax(1.0f, currentBpm.load());
+        const double bpm = 120.0;
         // Match SC: trigRate = ((bpm / 60) * 4 * density).max(0.1)
         const double grainsPerSecond = juce::jmax(0.1, ((bpm / 60.0) * 4.0 * (double)densityValue));
         const double spawnIntervalSamples = currentSampleRate / grainsPerSecond;

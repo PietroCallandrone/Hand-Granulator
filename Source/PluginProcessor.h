@@ -89,7 +89,6 @@ public:
     void startManualSynthNote(int noteNumber, float velocity);
     void stopManualSynthNote(int noteNumber);
     void setSynthADSR(float attackSec, float decaySec, float sustainLevel, float releaseSec);
-    void setCurrentBpm(float bpm) { currentBpm.store(juce::jmax(1.0f, bpm)); }
 
     juce::OSCSender processingSender;
     
@@ -119,7 +118,6 @@ private:
     std::atomic<float> pitch{ 0.0f };
     std::atomic<float> reverse{ 0.0f };
     std::atomic<float> lfoRate{0.0f};
-    std::atomic<float> currentBpm{ 120.0f };
     std::atomic<float> adsrAttack{ 0.01f };
     std::atomic<float> adsrDecay{ 0.10f };
     std::atomic<float> adsrSustain{ 0.85f };
