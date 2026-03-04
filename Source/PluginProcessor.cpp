@@ -172,8 +172,6 @@ void CMProjectAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlo
     currentSampleRate = sampleRate;
     samplesUntilNextGrain = 0.0;
     heldSynthNotes = 0;
-    synthGate = false;
-    synthEnvLevel = 0.0f;
     currentPitchRatio = 1.0f;
     pitchWheelSemitones = 0.0f;
     activeGrains.clear();
@@ -303,7 +301,7 @@ void CMProjectAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juc
     // Built-in granular synth
     std::scoped_lock synthLock(synthSampleMutex);
     if (synthSampleLoaded && synthSample.getNumSamples() > 1
-        && (heldSynthNotes > 0 || synthEnvLevel > 0.0f || !activeGrains.empty()))
+        && (heldSynthNotes > 0 || !activeGrains.empty()))
     {
         const int sampleLength = synthSample.getNumSamples();
         const int sourceChannels = synthSample.getNumChannels();
@@ -317,27 +315,11 @@ void CMProjectAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juc
         const double dt = 1.0 / juce::jmax(1.0, currentSampleRate);
         const double rc = 1.0 / (2.0 * juce::MathConstants<double>::pi * cutoffValue);
         const float lowpassAlpha = (float)juce::jlimit(0.0, 1.0, dt / (rc + dt));
-        const float sustainLevel = juce::jlimit(0.0f, 1.0f, adsrSustain.load());
-        const float attackStep = (float)(1.0 / juce::jmax(1.0, (double)(adsrAttack.load() * (float)currentSampleRate)));
-        const float decayStep = (float)((1.0 - sustainLevel) / juce::jmax(1.0, (double)(adsrDecay.load() * (float)currentSampleRate)));
-        const float releaseStep = (float)(1.0 / juce::jmax(1.0, (double)(adsrRelease.load() * (float)currentSampleRate)));
 
         for (int i = 0; i < numSamples; ++i)
         {
-            if (synthGate)
-            {
-                if (synthEnvLevel < 1.0f)
-                    synthEnvLevel = juce::jmin(1.0f, synthEnvLevel + attackStep);
-                else if (synthEnvLevel > sustainLevel)
-                    synthEnvLevel = juce::jmax(sustainLevel, synthEnvLevel - decayStep);
-            }
-            else
-            {
-                synthEnvLevel = juce::jmax(0.0f, synthEnvLevel - releaseStep);
-            }
-
             samplesUntilNextGrain -= 1.0;
-            while (synthGate && heldSynthNotes > 0 && samplesUntilNextGrain <= 0.0 && (int)activeGrains.size() < 96)
+            while (heldSynthNotes > 0 && samplesUntilNextGrain <= 0.0 && (int)activeGrains.size() < 96)
             {
                 spawnGrain();
                 samplesUntilNextGrain += spawnIntervalSamples;
@@ -364,7 +346,7 @@ void CMProjectAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juc
                     const float* src = synthSample.getReadPointer(juce::jmin(ch, sourceChannels - 1));
                     const float s0 = src[idx0];
                     const float s1 = src[idx1];
-                    const float raw = (s0 + (s1 - s0) * frac) * grain.gain * env * synthEnvLevel;
+                    const float raw = (s0 + (s1 - s0) * frac) * grain.gain * env;
                     grain.lowpassState += lowpassAlpha * (raw - grain.lowpassState);
                     buffer.addSample(ch, i, grain.lowpassState);
                 }
@@ -474,14 +456,12 @@ void CMProjectAudioProcessor::loadSynthSample(const juce::File& file)
     synthSampleLoaded = true;
     activeGrains.clear();
     samplesUntilNextGrain = 0.0;
-    synthEnvLevel = 0.0f;
 }
 
 void CMProjectAudioProcessor::startManualSynthNote(int noteNumber, float velocity)
 {
     synthVelocity = juce::jlimit(0.0f, 1.0f, velocity);
     heldSynthNotes++;
-    synthGate = true;
     const double freq = juce::MidiMessage::getMidiNoteInHertz(noteNumber);
     currentPitchRatio = (float)(freq / 440.0); // SC: pitchRatio = note.midicps / 440
 }
@@ -490,18 +470,6 @@ void CMProjectAudioProcessor::stopManualSynthNote(int noteNumber)
 {
     juce::ignoreUnused(noteNumber);
     heldSynthNotes = juce::jmax(0, heldSynthNotes - 1);
-    if (heldSynthNotes <= 0)
-    {
-        synthGate = false;
-    }
-}
-
-void CMProjectAudioProcessor::setSynthADSR(float attackSec, float decaySec, float sustainLevel, float releaseSec)
-{
-    adsrAttack.store(juce::jmax(0.001f, attackSec));
-    adsrDecay.store(juce::jmax(0.001f, decaySec));
-    adsrSustain.store(juce::jlimit(0.0f, 1.0f, sustainLevel));
-    adsrRelease.store(juce::jmax(0.001f, releaseSec));
 }
 
 void CMProjectAudioProcessor::spawnGrain()

@@ -118,10 +118,7 @@ private:
     std::atomic<float> pitch{ 0.0f };
     std::atomic<float> reverse{ 0.0f };
     std::atomic<float> lfoRate{0.0f};
-    std::atomic<float> adsrAttack{ 0.01f };
-    std::atomic<float> adsrDecay{ 0.10f };
-    std::atomic<float> adsrSustain{ 0.85f };
-    std::atomic<float> adsrRelease{ 0.20f };
+    std::atomic<float> currentBpm{ 120.0f };
     
 
 public:
@@ -136,8 +133,6 @@ public:
     double samplesUntilNextGrain = 0.0;
     int heldSynthNotes = 0;
     float synthVelocity = 1.0f;
-    bool synthGate = false;
-    float synthEnvLevel = 0.0f;
     float currentPitchRatio = 1.0f;
     float pitchWheelSemitones = 0.0f;
 
