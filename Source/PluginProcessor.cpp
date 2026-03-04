@@ -8,6 +8,7 @@
 
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <cmath>
 
 //==============================================================================
 CMProjectAudioProcessor::CMProjectAudioProcessor()
@@ -24,6 +25,7 @@ CMProjectAudioProcessor::CMProjectAudioProcessor()
 
 {
     formatManager.registerBasicFormats();
+    updateParameters();
     auto devices = juce::MidiInput::getAvailableDevices();
     for (auto& d : devices)
     DBG("MIDI Device: " + d.name);
@@ -32,16 +34,6 @@ CMProjectAudioProcessor::CMProjectAudioProcessor()
 
 CMProjectAudioProcessor::~CMProjectAudioProcessor()
 {
-    oscSender.send("/disconnect"); //Disconnects from SuperCollider method
-    oscSender.disconnect();
-}
-
-bool CMProjectAudioProcessor::sendLfoTargetOSC (const juce::String& param,
-                                                float min, float max)
-{
-    juce::OSCMessage msg("/lfoTarget", juce::String(param), min, max);
-    return oscSender.send (msg);     // return true / false to caller
-
 }
 
 //==============================================================================
@@ -129,7 +121,7 @@ void CMProjectAudioProcessor::changeProgramName (int index, const juce::String& 
 {
 }
 
-//function that sends messages to supercollider uplaoding the granulator
+// Handle OSC messages arriving from Python tracker
 void CMProjectAudioProcessor::oscMessageReceived(const juce::OSCMessage& message)
 {
     const auto address = message.getAddressPattern().toString();
@@ -145,15 +137,6 @@ void CMProjectAudioProcessor::oscMessageReceived(const juce::OSCMessage& message
         reverse = message[5].getFloat32();
         lfoRate = message[6].getFloat32();
 
-        oscSender.send("/grain",
-            grainDur.load(),
-            grainPos.load(),
-            cutoff.load(),
-            density.load(),
-            pitch.load()
-           );
-        oscSender.send("/lfoRate", lfoRate.load());
-        
     }
     
     else if (address == "/triggerDrum" && message.size() == 1 && message[0].isInt32())
@@ -171,11 +154,11 @@ void CMProjectAudioProcessor::oscMessageReceived(const juce::OSCMessage& message
 
 void CMProjectAudioProcessor::updateParameters() {
     
-    grainDur.store(0.02f);
-    grainPos.store(0.0f); 
+    grainDur.store(0.06f);
+    grainPos.store(0.01f); 
     cutoff.store(3000.0f); 
-    density.store(0.001f); 
-    pitch.store(1.0f); 
+    density.store(0.8f); 
+    pitch.store(0.0f); 
     reverse.store(0.0); 
     lfoRate.store(0.0f); 
 
@@ -185,18 +168,22 @@ void CMProjectAudioProcessor::updateParameters() {
 //==============================================================================
 void CMProjectAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
+    juce::ignoreUnused(samplesPerBlock);
+    currentSampleRate = sampleRate;
+    samplesUntilNextGrain = 0.0;
+    heldSynthNotes = 0;
+    synthGate = false;
+    synthEnvLevel = 0.0f;
+    currentPitchRatio = 1.0f;
+    pitchWheelSemitones = 0.0f;
+    activeGrains.clear();
+
     //formatManager.registerBasicFormats(); //Register WAV, AIFF, MP3 support
 
-    // SuperCollider bind
-    if (!oscSender.connect("127.0.0.1", 57121))
-        DBG("Could not connect to SuperCollider");
-    else
-        DBG("Connected to SuperCollider via OSC");
-    
     if(!processingSender.connect("127.0.0.1", 9003))
         DBG("Could not connect to Processing");
     else
-        DBG("Connected to SuperCollider via OSC");
+        DBG("Connected to Processing via OSC");
         
     // Python receiver
     if (!oscReceiver.connect(9001)) // match Python port
@@ -251,7 +238,7 @@ void CMProjectAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juc
     for (auto i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
         buffer.clear(i, 0, buffer.getNumSamples());
 
-    //MIDI → OSC handling
+    // MIDI handling
     for (const auto metadata : midiMessages)
     {
         auto msg = metadata.getMessage();
@@ -260,35 +247,22 @@ void CMProjectAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juc
         {
             auto note = msg.getNoteNumber(); // 0–127
             auto vel = msg.getVelocity() / 127.0f; // normalized 0.0–1.0
-            oscSender.send("/start", note, vel); //send it to supercollider
+            startManualSynthNote(note, vel);
         }
         else if (msg.isNoteOff())
         {
             auto note = msg.getNoteNumber();
-            oscSender.send("/stop", note); //send it to supercollider
+            stopManualSynthNote(note);
         }
-        else if (msg.isController())
+        else if (msg.isPitchWheel())
         {
-            // if you want CCs:
-            oscSender.send("/cc",
-                msg.getControllerNumber(),
-                msg.getControllerValue());
-        }
-        else if (msg.isPitchWheel()) {
-            //PitchWheel algorithm
-            int raw = msg.getPitchWheelValue();
-            float norm = (raw - 8192) / 8192.0f;   // → –1.0 … +1.0
-            oscSender.send("/pitchWheel", norm);
+            const int raw = msg.getPitchWheelValue();
+            const float norm = (raw - 8192) / 8192.0f; // -1..+1
+            pitchWheelSemitones = norm * 2.0f;         // SC behavior: +-2 semitones
         }
 
         if (isRecordingMidi)
-        {
-            juce::MidiBuffer::Iterator it(midiMessages);
-            juce::MidiMessage msg;
-            int samplePos;
-            while (it.getNextEvent(msg, samplePos))
-                recordedSequence.addEvent(msg);
-        }
+            recordedSequence.addEvent(msg);
     }
 
     // ===============================
@@ -316,7 +290,6 @@ void CMProjectAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juc
                 {
                     float* out = buffer.getWritePointer(ch);
                     const float* in = sample.getReadPointer(juce::jmin(ch, sample.getNumChannels() - 1));
-                    float val = in[playbackPositions[track]] * trackVolumes[track];
                     out[i] += in[playbackPositions[track]] * trackVolumes[track];
                 }
 
@@ -324,6 +297,84 @@ void CMProjectAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juc
             }
             if (playbackPositions[track] >= sampleLength)
                 triggerPlayback[track] = false;
+        }
+    }
+
+    // Built-in granular synth
+    std::scoped_lock synthLock(synthSampleMutex);
+    if (synthSampleLoaded && synthSample.getNumSamples() > 1
+        && (heldSynthNotes > 0 || synthEnvLevel > 0.0f || !activeGrains.empty()))
+    {
+        const int sampleLength = synthSample.getNumSamples();
+        const int sourceChannels = synthSample.getNumChannels();
+
+        const float densityValue = juce::jmax(0.01f, density.load());
+        const double bpm = juce::jmax(1.0f, currentBpm.load());
+        // Match SC: trigRate = ((bpm / 60) * 4 * density).max(0.1)
+        const double grainsPerSecond = juce::jmax(0.1, ((bpm / 60.0) * 4.0 * (double)densityValue));
+        const double spawnIntervalSamples = currentSampleRate / grainsPerSecond;
+        const float cutoffValue = juce::jlimit(20.0f, 20000.0f, cutoff.load());
+        const double dt = 1.0 / juce::jmax(1.0, currentSampleRate);
+        const double rc = 1.0 / (2.0 * juce::MathConstants<double>::pi * cutoffValue);
+        const float lowpassAlpha = (float)juce::jlimit(0.0, 1.0, dt / (rc + dt));
+        const float sustainLevel = juce::jlimit(0.0f, 1.0f, adsrSustain.load());
+        const float attackStep = (float)(1.0 / juce::jmax(1.0, (double)(adsrAttack.load() * (float)currentSampleRate)));
+        const float decayStep = (float)((1.0 - sustainLevel) / juce::jmax(1.0, (double)(adsrDecay.load() * (float)currentSampleRate)));
+        const float releaseStep = (float)(1.0 / juce::jmax(1.0, (double)(adsrRelease.load() * (float)currentSampleRate)));
+
+        for (int i = 0; i < numSamples; ++i)
+        {
+            if (synthGate)
+            {
+                if (synthEnvLevel < 1.0f)
+                    synthEnvLevel = juce::jmin(1.0f, synthEnvLevel + attackStep);
+                else if (synthEnvLevel > sustainLevel)
+                    synthEnvLevel = juce::jmax(sustainLevel, synthEnvLevel - decayStep);
+            }
+            else
+            {
+                synthEnvLevel = juce::jmax(0.0f, synthEnvLevel - releaseStep);
+            }
+
+            samplesUntilNextGrain -= 1.0;
+            while (synthGate && heldSynthNotes > 0 && samplesUntilNextGrain <= 0.0 && (int)activeGrains.size() < 96)
+            {
+                spawnGrain();
+                samplesUntilNextGrain += spawnIntervalSamples;
+            }
+
+            for (int g = (int)activeGrains.size() - 1; g >= 0; --g)
+            {
+                auto& grain = activeGrains[(size_t)g];
+
+                if (grain.remainingSamples <= 0)
+                {
+                    activeGrains.erase(activeGrains.begin() + g);
+                    continue;
+                }
+
+                const int idx0 = juce::jlimit(0, sampleLength - 1, (int)grain.samplePos);
+                const int idx1 = juce::jlimit(0, sampleLength - 1, idx0 + 1);
+                const float frac = (float)(grain.samplePos - (double)idx0);
+                const float progress = 1.0f - ((float)grain.remainingSamples / (float)grain.totalSamples);
+                const float env = 0.5f - 0.5f * std::cos(juce::MathConstants<float>::twoPi * progress);
+
+                for (int ch = 0; ch < numChannels; ++ch)
+                {
+                    const float* src = synthSample.getReadPointer(juce::jmin(ch, sourceChannels - 1));
+                    const float s0 = src[idx0];
+                    const float s1 = src[idx1];
+                    const float raw = (s0 + (s1 - s0) * frac) * grain.gain * env * synthEnvLevel;
+                    grain.lowpassState += lowpassAlpha * (raw - grain.lowpassState);
+                    buffer.addSample(ch, i, grain.lowpassState);
+                }
+
+                grain.samplePos += grain.sampleStep;
+                grain.remainingSamples--;
+
+                if (grain.samplePos < 0.0 || grain.samplePos >= (double)(sampleLength - 1))
+                    grain.remainingSamples = 0;
+            }
         }
     }
 }
@@ -408,4 +459,80 @@ bool CMProjectAudioProcessor::saveMidiRecording(const juce::File& file)
     }
     return false;
 }
+
+void CMProjectAudioProcessor::loadSynthSample(const juce::File& file)
+{
+    std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(file));
+    if (reader == nullptr)
+        return;
+
+    juce::AudioBuffer<float> temp((int)reader->numChannels, (int)reader->lengthInSamples);
+    reader->read(&temp, 0, (int)reader->lengthInSamples, 0, true, true);
+
+    std::scoped_lock lock(synthSampleMutex);
+    synthSample = std::move(temp);
+    synthSampleLoaded = true;
+    activeGrains.clear();
+    samplesUntilNextGrain = 0.0;
+    synthEnvLevel = 0.0f;
+}
+
+void CMProjectAudioProcessor::startManualSynthNote(int noteNumber, float velocity)
+{
+    synthVelocity = juce::jlimit(0.0f, 1.0f, velocity);
+    heldSynthNotes++;
+    synthGate = true;
+    const double freq = juce::MidiMessage::getMidiNoteInHertz(noteNumber);
+    currentPitchRatio = (float)(freq / 440.0); // SC: pitchRatio = note.midicps / 440
+}
+
+void CMProjectAudioProcessor::stopManualSynthNote(int noteNumber)
+{
+    juce::ignoreUnused(noteNumber);
+    heldSynthNotes = juce::jmax(0, heldSynthNotes - 1);
+    if (heldSynthNotes <= 0)
+    {
+        synthGate = false;
+    }
+}
+
+void CMProjectAudioProcessor::setSynthADSR(float attackSec, float decaySec, float sustainLevel, float releaseSec)
+{
+    adsrAttack.store(juce::jmax(0.001f, attackSec));
+    adsrDecay.store(juce::jmax(0.001f, decaySec));
+    adsrSustain.store(juce::jlimit(0.0f, 1.0f, sustainLevel));
+    adsrRelease.store(juce::jmax(0.001f, releaseSec));
+}
+
+void CMProjectAudioProcessor::spawnGrain()
+{
+    if (!synthSampleLoaded || synthSample.getNumSamples() <= 1)
+        return;
+
+    const int sampleLength = synthSample.getNumSamples();
+    const double sampleDurationSeconds = (double)sampleLength / juce::jmax(1.0, currentSampleRate);
+    const float posSeconds = juce::jlimit(0.0f, (float)sampleDurationSeconds, grainPos.load());
+    const float durSeconds = juce::jlimit(0.005f, 0.5f, grainDur.load());
+    const bool isReverse = reverse.load() >= 0.5f;
+
+    // SC behavior: playbackRate = basePitchRatio * shiftFactor * wheelFactor
+    const float shiftSemitones = juce::jlimit(-24.0f, 24.0f, pitch.load());
+    const float wheelSemitones = juce::jlimit(-2.0f, 2.0f, pitchWheelSemitones);
+    const double shiftFactor = std::pow(2.0, shiftSemitones / 12.0);
+    const double wheelFactor = std::pow(2.0, wheelSemitones / 12.0);
+    const double rate = (double)currentPitchRatio * shiftFactor * wheelFactor;
+
+    Grain grain;
+    grain.totalSamples = juce::jmax(16, (int)std::round(durSeconds * (float)currentSampleRate));
+    grain.remainingSamples = grain.totalSamples;
+    grain.sampleStep = isReverse ? -rate : rate;
+    grain.samplePos = juce::jlimit(0.0, (double)(sampleLength - 1), posSeconds * currentSampleRate);
+    grain.gain = juce::jlimit(0.02f, 1.0f, synthVelocity * 0.2f);
+    grain.lowpassState = 0.0f;
+
+    activeGrains.push_back(grain);
+}
+
+
+
 
