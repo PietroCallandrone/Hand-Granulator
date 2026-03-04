@@ -1,0 +1,75 @@
+# Ignore build files and settings
+Builds/
+*.jucer.lock
+*.sln
+*.vcxproj*
+*.user
+*.suo
+
+# Ignore hidden system files
+.DS_Store
+Thumbs.db
+
+# Ignore IDE settings
+.vs/
+.idea/
+
+# Ignore JUCE example builds if any
+Debug/
+Release/
+
+# Xcode project files
+*.xcworkspace
+*.xcuserdata
+*.xcuserstate
+*.xcodeproj/project.xcworkspace
+*.xcodeproj/xcuserdata
+
+# Build products
+build/
+DerivedData/
+
+# SwiftPM
+.build/
+.swiftpm/xcode/
+
+# iOS/Simulator files
+*.ipa
+*.dSYM.zip
+*.dSYM
+*.app
+
+# Carthage
+Carthage/Build/
+
+# CocoaPods
+Pods/
+
+# Fastlane
+fastlane/report.xml
+fastlane/screenshots
+fastlane/test_output
+
+# Xcode automatic files
+*.moved-aside
+*.hmap
+*.ipa
+*.xcuserstate
+
+# Archives
+*.xcarchive
+
+# Playground
+timeline.xctimeline
+playground.xcworkspace
+
+# Swift Package Manager
+Package.resolved
+
+# Misc
+.idea/
+*.orig
+*.swp
+*.lock
+*.log
+

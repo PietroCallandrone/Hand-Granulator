@@ -21,10 +21,12 @@ def launch_processing_sketch() -> subprocess.Popen | None:
     # 2) cartella dello sketch (non il .pde)
     sketch_dir = (base_dir / "../Processing/hand_filter").resolve()
     if not sketch_dir.is_dir():
-        raise FileNotFoundError(f"La cartella dello sketch non esiste:\n  {sketch_dir}")
+        print(f"[WARN] Processing sketch folder not found: {sketch_dir}")
+        return None
 
     # 3) Enhanced Processing detection for macOS
     processing_cmd = None
+    use_processing_cli = False
     
     if platform.system() == "Darwin":
         # Try multiple common Processing locations on macOS
@@ -39,29 +41,51 @@ def launch_processing_sketch() -> subprocess.Popen | None:
             if path and Path(path).exists():
                 processing_cmd = str(path)
                 break
+    elif platform.system() == "Windows":
+        # Processing 4 on Windows may not ship processing-java in PATH.
+        # Prefer legacy processing-java when available, then fallback to Processing.exe CLI.
+        possible_paths = [
+            shutil.which("processing-java"),
+            shutil.which("processing-java.exe"),
+            shutil.which("processing"),
+            shutil.which("processing.exe"),
+            r"C:\Program Files\Processing\Processing.exe",
+            r"C:\Program Files\Processing 4\Processing.exe",
+        ]
+
+        for path in possible_paths:
+            if path and Path(path).exists():
+                processing_cmd = str(path)
+                if Path(path).name.lower() == "processing.exe":
+                    use_processing_cli = True
+                break
     else:
-        # Non-macOS systems
+        # Non-macOS/Linux systems
         processing_cmd = shutil.which("processing-java")
 
     if processing_cmd is None:
-        raise FileNotFoundError(
-            "processing-java not found. Install Processing or add "
-            "processing-java to PATH.\n"
-            "Example (macOS Homebrew):\n"
-            "  brew install --cask processing\n"
-            "  ln -s /Applications/Processing.app/Contents/MacOS/processing-java "
-            "/usr/local/bin/processing-java"
+        print(
+            "[WARN] processing-java not found. Continuing without Processing visuals."
         )
+        return None
 
     # 4) Make sure the sketch directory path is absolute and properly formatted
     sketch_path = str(sketch_dir.resolve())
     
     # 5) Build command with explicit parameters
-    cmd = [
-        processing_cmd,
-        f"--sketch={sketch_path}",
-        "--run"
-    ]
+    if use_processing_cli:
+        cmd = [
+            processing_cmd,
+            "cli",
+            f"--sketch={sketch_path}",
+            "--run",
+        ]
+    else:
+        cmd = [
+            processing_cmd,
+            f"--sketch={sketch_path}",
+            "--run",
+        ]
 
     print("Processing command:", " ".join(cmd))
     print("Sketch directory:", sketch_path)
