@@ -275,11 +275,10 @@ public:
     juce::TextButton resetButton{ "Reset" }; //Button useful to reset all the default values
     
     //Constructor
-    SynthPageComponent()
+    SynthPageComponent(CMProjectAudioProcessor& p) : processor(p)
     {
         formatManager.registerBasicFormats(); //wav,mp3
         thumbnail.addChangeListener(this);
-        connectToSuperCollider(); //Function that connects juce to supercollider
         granulatorParametersTitle(); //Granulator parameters
         imagesSetup(); //Function that loads all the images
         setButtonsAndLookAndFeel();//Function that sets the buttons and the different look and feel
@@ -305,10 +304,7 @@ public:
                 child->setLookAndFeel(nullptr);
         }
         
-        oscSender.send("/stop", 60);
         thumbnail.removeChangeListener(this);
-        oscSender.send("/disconnect");
-        oscSender.disconnect();
     }
     void adsrTitleSet() {
         extraTitleLabel.setText("ADSR Envelope", juce::dontSendNotification);
@@ -380,7 +376,7 @@ public:
         int defaultNote = 60; //MIDI C4, used as default sound if you hit startSound
         float defaultVel = 1.0f;
         startButton.onClick = [this, defaultNote, defaultVel]() {
-            oscSender.send("/start", defaultNote, defaultVel);
+            processor.startManualSynthNote(defaultNote, defaultVel);
             stopButton.setEnabled(true);
             //Turn on glow
             startButton.setToggleState(true, juce::dontSendNotification);
@@ -388,7 +384,7 @@ public:
             };
 
         stopButton.onClick = [this, defaultNote]() {
-            oscSender.send("/stop", defaultNote);
+            processor.stopManualSynthNote(defaultNote);
             stopButton.setEnabled(false);
             //Turn off glow
             startButton.setToggleState(false, juce::dontSendNotification);
@@ -418,20 +414,12 @@ public:
         saveMidiButton.setEnabled(false);
         recordMidiButton.setLookAndFeel(&recordMidiLookAndFeel);
         stopMidiButton.setLookAndFeel(&stopMidiLookAndFeel);
-        startButton.setButtonText("Start Drums");
-        stopButton.setButtonText("Stop Drums");
+        startButton.setButtonText("Start Synth");
+        stopButton.setButtonText("Stop Synth");
         startButton.setLookAndFeel(&startButtonLookAndFeel);
         stopButton.setLookAndFeel(&stopButtonLookAndFeel);
         startButton.setClickingTogglesState(false);
         stopButton.setClickingTogglesState(false);
-    }
-
-    void connectToSuperCollider() {
-        if (!oscSender.connect("127.0.0.1", 57121))
-            DBG("❌ Could not connect to SuperCollider on port 57121");
-        else
-            DBG("✅ Connected to SuperCollider via OSC");
-
     }
 
     void granulatorParametersTitle() {
@@ -651,7 +639,7 @@ public:
         float dec = (float)decaySlider.getValue();
         float sus = (float)sustainSlider.getValue();
         float rel = (float)releaseSlider.getValue();
-        oscSender.send("/env", atk, dec, sus, rel); //send it to supercollider
+        processor.setSynthADSR(atk, dec, sus, rel);
         repaint(); //Paint again the wave
     }
 
@@ -701,7 +689,7 @@ public:
             //Point thumbnail & OSC at the *temp*
             thumbnail.setSource(new juce::FileInputSource(temp));
             repaint();
-            oscSender.send("/loadSample", temp.getFullPathName()); //resend the correct sample to supercollider
+            processor.loadSynthSample(temp);
 
             //Update state
             currentSampleFile = temp;
@@ -712,7 +700,7 @@ public:
             //Simply restore the original
             thumbnail.setSource(new juce::FileInputSource(originalSampleFile));
             repaint();
-            oscSender.send("/loadSample", originalSampleFile.getFullPathName());
+            processor.loadSynthSample(originalSampleFile);
 
             currentSampleFile = originalSampleFile;
             isReversed = false;
@@ -909,7 +897,7 @@ public:
         {
             DBG("→ Dropped file: " << droppedFile.getFullPathName());
 
-            oscSender.send("/loadSample", droppedFile.getFullPathName());
+            processor.loadSynthSample(droppedFile);
 
             thumbnail.setSource(new juce::FileInputSource(droppedFile));
             repaint();
@@ -933,8 +921,8 @@ public:
     }
 
 private:
+    CMProjectAudioProcessor& processor;
     juce::Slider BPMSlider;
-    juce::OSCSender oscSender;
     juce::Label grainDurLabel, grainPosLabel, cutoffLabel, bpmLabel;
     juce::Rectangle<int> waveformArea;
     juce::AudioFormatManager formatManager;   // Used to recognize audio formats (.wav, .mp3, etc.)
@@ -968,14 +956,14 @@ private:
                 if (fileToLoad.existsAsFile())
                 {
                     DBG("→ Loading sample: " << fileToLoad.getFullPathName());
-                    oscSender.send("/loadSample", fileToLoad.getFullPathName());
+                    processor.loadSynthSample(fileToLoad);
 
                     // Send sample duration [s]
                     double duration = 0.0;
                     if (auto* reader = formatManager.createReaderFor(fileToLoad))
                     {
                         duration = reader->lengthInSamples / reader->sampleRate;
-                        oscSender.send("/sampleDuration", (float)duration);
+                        processor.senderToPython.send("/sampleDuration", (float)duration);
                         DBG("Sample duration: " << duration << " seconds");
                         delete reader;
                     }
@@ -1000,7 +988,7 @@ private:
         chooser.release();
     }
 
-    //Function that sends the new values to the supercollider granulator
+    // Reserved for future sync logic (currently local-only)
     void sendOSC()
     {
         auto* editor = dynamic_cast<CMProjectAudioProcessorEditor*>(getParentComponent());
@@ -1009,7 +997,7 @@ private:
         {
             auto text = editor->bpmLabel.getText();
             bpm = text.getFloatValue();
-            oscSender.send("/bpm", bpm);
+            processor.setCurrentBpm(bpm);
    
         }
 
@@ -1505,7 +1493,7 @@ CMProjectAudioProcessorEditor::~CMProjectAudioProcessorEditor()
 }
 
 void CMProjectAudioProcessorEditor::startingConfigurationGlobal() {
-    synthPage = new SynthPageComponent();
+    synthPage = new SynthPageComponent(audioProcessor);
     drumPage = new DrumPageComponent(audioProcessor);
     background = std::make_unique<GridBackgroundComponent>();
     addAndMakeVisible(background.get()); //comes before anything else
@@ -2261,9 +2249,6 @@ void CMProjectAudioProcessorEditor::buttonClicked(juce::Button* button)
         synthPage->isLfoActive = true;
         synthPage->repaint();
 
-        
-        if (! audioProcessor.sendLfoTargetOSC (currentParameter))
-                DBG ("Could not send /lfoTarget");
     }
     else if (button == &clearFingersButton)
     {
@@ -2469,3 +2454,4 @@ void CMProjectAudioProcessorEditor::timerCallback()
         isPythonOn = false;
     }
 }
+

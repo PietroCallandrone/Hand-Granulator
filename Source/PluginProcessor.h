@@ -9,6 +9,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <vector>
 
 //==============================================================================
 /**
@@ -84,12 +85,13 @@ public:
     void setlfoRate(float x) { lfoRate.store(x); }
 
     void updateParameters();
+    void loadSynthSample(const juce::File& file);
+    void startManualSynthNote(int noteNumber, float velocity);
+    void stopManualSynthNote(int noteNumber);
+    void setSynthADSR(float attackSec, float decaySec, float sustainLevel, float releaseSec);
+    void setCurrentBpm(float bpm) { currentBpm.store(juce::jmax(1.0f, bpm)); }
 
-    bool sendLfoTargetOSC (const juce::String& param,
-                               float min = 0.0f,
-                               float max = 1.0f);
     juce::OSCSender processingSender;
-    juce::OSCSender oscSender;
     
 
 private:
@@ -110,14 +112,18 @@ private:
     std::mutex sampleMutex; // optional but safe
 
     // GUI update parameters
-    std::atomic<float> grainDur{ 0.0f };
-    std::atomic<float> grainPos{ 0.0f };
-    std::atomic<float> cutoff{ 0.0f };
-    std::atomic<float> density{ 0.0f };
+    std::atomic<float> grainDur{ 0.06f };
+    std::atomic<float> grainPos{ 0.01f };
+    std::atomic<float> cutoff{ 8000.0f };
+    std::atomic<float> density{ 0.8f };
     std::atomic<float> pitch{ 0.0f };
     std::atomic<float> reverse{ 0.0f };
     std::atomic<float> lfoRate{0.0f};
     std::atomic<float> currentBpm{ 120.0f };
+    std::atomic<float> adsrAttack{ 0.01f };
+    std::atomic<float> adsrDecay{ 0.10f };
+    std::atomic<float> adsrSustain{ 0.85f };
+    std::atomic<float> adsrRelease{ 0.20f };
     
 
 public:
@@ -125,6 +131,31 @@ public:
     void triggerSamplePlayback(int trackIndex);
     void oscMessageReceived(const juce::OSCMessage& message) override;
     std::array<float, 4> trackVolumes = { 1.0f, 1.0f, 1.0f, 1.0f };
+    juce::AudioBuffer<float> synthSample;
+    bool synthSampleLoaded = false;
+    std::mutex synthSampleMutex;
+    double currentSampleRate = 44100.0;
+    double samplesUntilNextGrain = 0.0;
+    int heldSynthNotes = 0;
+    float synthVelocity = 1.0f;
+    bool synthGate = false;
+    float synthEnvLevel = 0.0f;
+    float currentPitchRatio = 1.0f;
+    float pitchWheelSemitones = 0.0f;
+
+    struct Grain
+    {
+        double samplePos = 0.0;
+        double sampleStep = 1.0;
+        int remainingSamples = 0;
+        int totalSamples = 0;
+        float gain = 0.0f;
+        float lowpassState = 0.0f;
+    };
+
+    std::vector<Grain> activeGrains;
+
+    void spawnGrain();
     
 
 
