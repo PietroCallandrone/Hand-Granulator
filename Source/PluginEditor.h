@@ -103,7 +103,7 @@ public:
     void pluginTitle();
     void loadHandiImageFromPath();
     void midiOnClickSetUpFunction();
-    void clearFingersStartAllSetUp();
+    void clearFingersSetUp();
     void startingConfigurationGlobal();
     void addListenerToGLobal();
     juce::TextButton clearFingersButton{ "Clear Fingers" };
@@ -113,15 +113,12 @@ public:
 private:
 
     class SynthPageComponent;
-    LoadButtonLookAndFeel startAllButtonLookAndFeel;
     LoadButtonLookAndFeel clearFingerButtonLookAndFeel;
     std::unique_ptr<GridBackgroundComponent> background;
     CMProjectAudioProcessor& audioProcessor;
     juce::ImageComponent handOverlay;
     SynthPageComponent* synthPage = nullptr;
     juce::TooltipWindow tooltipWindow{ this, 300 /* delay in ms */ }; //OnMousePointed
-    juce::TextButton startAllButton{ "Start All" };
-    
     void clearLookAndFeelRecursively(Component* component)
     {
         if (component == nullptr) return;
@@ -257,7 +254,6 @@ private:
     CircleButton middleLeftButton;
     CircleButton indexRightButton;
     CircleButton middleRightButton;
-    CircleButton lfoParamButton;
     juce::ImageComponent indexGlow, middleGlow, ringGlow, pinkyGlow;
 
     // Draws and positions a projecting image for the selected parameter at a given location with optional rotation and size

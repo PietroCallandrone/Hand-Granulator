@@ -12,8 +12,7 @@ static const std::map<juce::String, juce::String> parameterToGlowImage = {
     { "GrainDensity", "glow_grainDensity.png" },
     { "GrainReverse", "glow_grainReverse.png" },
     { "GrainPitch", "glow_grainPitch.png" },
-    { "GrainCutOff", "glow_grainCutOff.png" },
-    { "lfoRate", "glow_lfo.png" }
+    { "GrainCutOff", "glow_grainCutOff.png" }
 };
 
 //Resolves and returns the full path to a projection image file located in the "Assets" folder of the project directory
@@ -262,14 +261,13 @@ class CMProjectAudioProcessorEditor::SynthPageComponent : public juce::Component
 public:
     juce::TextButton startButton, stopButton, startCamera, stopCamera, loadSampleButton; //StartSynth, StopSynth, StartCamera, StopCamera
     juce::TextButton recordMidiButton{ "Record MIDI" }, stopMidiButton{ "Stop Recording" }, saveMidiButton{ "Save MIDI" }; //Midi buttons
-    HDImageButton grainPos, grainDur, grainDensity, grainReverse, grainCutOff, grainPitch, lfoRate; //Hd images for granulator parameters
+    HDImageButton grainPos, grainDur, grainDensity, grainReverse, grainCutOff, grainPitch; //Hd images for granulator parameters
     juce::Image startImg, stopImg; //Start and Stop Images
     juce::Label granulatorTitle;
     juce::File currentSampleFile, originalSampleFile; //Reversed- not reversed file
     bool isReversed = false; //Boolean to handle when the sample is reversed or not
     float currentGrainPos = 0.0f; //Current grain position value
     float sampleDuration = 1.0f; //default, will be updated
-    bool isLfoActive = false;
     juce::TextButton resetButton{ "Reset" }; //Button useful to reset all the default values
     
     //Constructor
@@ -315,10 +313,7 @@ public:
         addAndMakeVisible(grainCutOff);
         addAndMakeVisible(grainPitch);
         addAndMakeVisible(grainReverse);
-        addAndMakeVisible(lfoRate);
         addAndMakeVisible(granulatorTitle);
-        addAndMakeVisible(lfoLinkLine);
-        lfoLinkLine.setInterceptsMouseClicks(false, false);
 
     }
     void imagesSetup() {
@@ -334,9 +329,6 @@ public:
         setupImageButton(grainPitch, grainPitchFile);
         juce::File grainReverseFile = getIconFile("grainReverse.png");
         setupImageButton(grainReverse, grainReverseFile);
-        juce::File lfoRateFile = getIconFile("lfo.png");
-        setupImageButton(lfoRate, lfoRateFile);
-
     }
 
     void onClickSynthFunction() {
@@ -550,59 +542,12 @@ public:
         grainDur.setBounds(81.5, 391.7, 84, 84);
         //move and size of grainDensity 
         grainDensity.setBounds(168, 400, 65, 65);
-        //move and size of lforate 
-         lfoRate.setBounds(12.5, 550, 73, 73);
-
         //waveform
         area.removeFromTop(20);
         int waveformHeight = 140;
         waveformArea = area.removeFromTop(waveformHeight);
         granulatorTitle.setBounds(20, 350, 300, 30);  //Granulator title
 
-
-        //lfo line position
-        lfoLinkLine.setBounds(84.5, 584, 85, 4); // adjust x, y, width, height
-    }
-    void paintOverChildren(juce::Graphics& g) override
-    {
-        auto bounds = lfoLinkLine.getBounds().toFloat();
-
-        if (isLfoActive)
-        {
-            // Base line color
-            juce::Colour base = juce::Colours::limegreen.withBrightness(1.25f).withAlpha(0.9f);
-
-            // Glow color (less saturated, translucent)
-            juce::Colour glow = juce::Colours::limegreen.withAlpha(0.25f);
-
-            // Fill the base line
-            g.setColour(base);
-            g.fillRect(bounds);
-
-            // Add glow shadow (soft spread)
-            juce::DropShadow softShadow(glow, 12, {});
-            softShadow.drawForRectangle(g, bounds.toNearestInt());
-
-            // Add top translucent gloss (like the gloss area in your buttons)
-            auto glossHeight = bounds.getHeight() * 0.5f;
-            juce::Rectangle<float> gloss(bounds.getX(), bounds.getY(), bounds.getWidth(), glossHeight);
-
-            juce::ColourGradient glossGrad(
-                juce::Colours::white.withAlpha(0.05f),
-                gloss.getCentreX(), gloss.getY(),
-                juce::Colours::transparentBlack,
-                gloss.getCentreX(), gloss.getBottom(),
-                false
-            );
-
-            g.setGradientFill(glossGrad);
-            g.fillRect(gloss);
-        }
-        else
-        {
-            g.setColour(juce::Colours::darkgrey.withAlpha(0.5f));
-            g.fillRect(bounds);
-        }
     }
 
     void setupImageButton(juce::ImageButton& button, const juce::File& imageFile)
@@ -710,10 +655,6 @@ private:
     StopMidiButtonLookAndFeel stopMidiLookAndFeel;
     StartButtonLookAndFeel  startButtonLookAndFeel;
     StopButtonLookAndFeel   stopButtonLookAndFeel;
-    juce::Component lfoLinkLine;
-
-
-
     //Function that allows to select a sample to play
     void pickAndLoadSample()
     {
@@ -798,7 +739,7 @@ CMProjectAudioProcessorEditor::CMProjectAudioProcessorEditor(CMProjectAudioProce
 {
     startingConfigurationGlobal(); //Function that handles the starting configuration
     loadHandiImageFromPath(); //function that handles the upload of the hand image
-    clearFingersStartAllSetUp(); //Function that handles ClearFingers and StartAll
+    clearFingersSetUp(); //Function that handles ClearFingers setup
     setToolTipFunction(); //Function that handles all the toolTip functions for both Synth and Drum page
     midiOnClickSetUpFunction(); //Function that handles all the oneclick setup functions
     pluginTitle(); //function that sets the plugin title
@@ -824,7 +765,6 @@ CMProjectAudioProcessorEditor::~CMProjectAudioProcessorEditor()
         middleButton.removeListener(this);
         ringButton.removeListener(this);
         pinkyButton.removeListener(this);
-        lfoParamButton.removeListener(this);
         indexLeftButton.removeListener(this);
         middleLeftButton.removeListener(this);
         clearLookAndFeelRecursively (this);
@@ -847,7 +787,6 @@ void CMProjectAudioProcessorEditor::setToolTipFunction() {
     synthPage->grainReverse.setTooltip("Grain Reverse\nToggle to play each grain backwards.");
     synthPage->grainPitch.setTooltip("Grain Pitch\nTransposes the pitch of each grain.");
     synthPage->grainCutOff.setTooltip("Filter Cut-off\nA low-pass cutoff on the granular output.");
-    synthPage->lfoRate.setTooltip("LFO Rate");
     synthPage->startButton.setTooltip("Start Button");
     synthPage->stopButton.setTooltip("Stop Button");
     synthPage->startCamera.setTooltip("Start Camera");
@@ -877,11 +816,6 @@ void CMProjectAudioProcessorEditor::fingersSetUp() {
     addAndMakeVisible(pinkyButton); //Pinky Finger
     pinkyButton.addListener(this);
     pinkyButton.setZoomFactor(2.5f);
-    lfoParamButton.setSquareStyle(true); // this sets the visual style to square
-    addAndMakeVisible(lfoParamButton); //Parameter modulated by LFO
-    lfoParamButton.addListener(this);
-    lfoParamButton.setZoomFactor(2.5f);
-    lfoParamButton.setTooltip("Parameter Modulated by LFO");
     addAndMakeVisible(statusDisplay); //Status Display
     addAndMakeVisible(indexLeftButton); //IndexLeftFinger
     indexLeftButton.addListener(this);
@@ -902,14 +836,10 @@ void CMProjectAudioProcessorEditor::fingersSetUp() {
 
 
 }
-void CMProjectAudioProcessorEditor::clearFingersStartAllSetUp() {
+void CMProjectAudioProcessorEditor::clearFingersSetUp() {
     addAndMakeVisible(clearFingersButton);
     clearFingersButton.addListener(this);
     clearFingersButton.setLookAndFeel(&clearFingerButtonLookAndFeel);
-    startAllButton.setLookAndFeel(&startAllButtonLookAndFeel);
-    startAllButton.setClickingTogglesState(true);
-    startAllButton.addListener(this);
-    addAndMakeVisible(startAllButton);
 }
 void CMProjectAudioProcessorEditor::midiOnClickSetUpFunction() {
     //Midi on.click setup
@@ -974,7 +904,6 @@ void CMProjectAudioProcessorEditor::addListenerToGLobal() {
     synthPage->grainReverse.addListener(this);
     synthPage->grainPitch.addListener(this);
     synthPage->grainCutOff.addListener(this);
-    synthPage->lfoRate.addListener(this);
 
 
 }
@@ -990,11 +919,6 @@ void CMProjectAudioProcessorEditor::resized()
     juce::ignoreUnused(areas);
 
     synthPage->setBounds(fullArea);
-
-    // Keep Start All aligned with the synth transport row.
-    const int startAllX = synthPage->stopCamera.getRight() + 12;
-    const int startAllY = synthPage->startButton.getY();
-    startAllButton.setBounds(startAllX, startAllY, 100, 30);
 
     handOverlay.setBounds(65, 380, 800, 350); //Hands dimension and displacement
 
@@ -1034,12 +958,6 @@ void CMProjectAudioProcessorEditor::resized()
     const int pinkyY = imageY + pinkyOffy - circleDiameter / 2;
     pinkyButton.setBounds(pinkyX, pinkyY, circleDiameter, circleDiameter);
     
-    const int lfoOffx = 139;
-    const int lfoOffy = 221;
-    const int lfoX = imageX + lfoOffx - circleDiameter / 2;
-    const int lfoY = imageY + lfoOffy - circleDiameter / 2;
-    lfoParamButton.setBounds(lfoX, lfoY, 40, 40);
-    
     auto area = getLocalBounds();
     auto boxW = 180;
     auto boxH = 50;
@@ -1078,36 +996,6 @@ void CMProjectAudioProcessorEditor::buttonClicked(juce::Button* button)
         statusDisplay.showMessage("Resetting parameters!");
         return;
     }
-
-    if (button == &startAllButton)
-    {
-        if (startAllButton.getToggleState())
-        {
-            if (synthPage->startButton.isEnabled())
-            {
-                synthPage->startButton.triggerClick();
-                synthPage->stopButton.setEnabled(false);
-                statusDisplay.showMessage("Synth Started");
-            }
-            else
-                statusDisplay.showMessage("Something already playing!");
-        }
-        else
-        {
-            if (synthPage->stopButton.isEnabled())
-            {
-                synthPage->stopButton.triggerClick();
-                synthPage->startButton.setEnabled(true);
-                statusDisplay.showMessage("Synth Stopped");
-            }
-            else
-                statusDisplay.showMessage("can't do this!");
-        }
-        return;
-    }
-
-    if (startAllButton.getToggleState() && button == &synthPage->stopButton)
-        return;
 
     if (button == &synthPage->startCamera)
     {
@@ -1170,13 +1058,6 @@ void CMProjectAudioProcessorEditor::buttonClicked(juce::Button* button)
         currentParameterIcon = synthPage->grainCutOff.getNormalImage();
         statusDisplay.showMessage("CutOff selected");
     }
-    else if (button == &synthPage->lfoRate)
-    {
-        setCurrentParameter("lfoRate");
-        currentParameterIcon = synthPage->lfoRate.getNormalImage();
-        statusDisplay.showMessage("lfoRate selected");
-    }
-
     auto isAlreadyAssigned = [&](const juce::String& param) -> bool
     {
         for (int i = 0; i < 4; ++i)
@@ -1248,17 +1129,6 @@ void CMProjectAudioProcessorEditor::buttonClicked(juce::Button* button)
         assignGlowToFinger(currentParameter, pinkyGlow, { 437, 382 }, -25.0f, 68, 68);
         audioProcessor.processingSender.send("/fingers_proc", 4);
     }
-    else if (button == &lfoParamButton)
-    {
-        if (currentParameter.isEmpty()) { statusDisplay.showMessage("Select a parameter"); return; }
-        if (currentParameter == "lfoRate") { statusDisplay.showMessage("Can't assign LFO Rate"); return; }
-
-        lfoParamButton.setIconImage(currentParameterIcon);
-        lfoParamButton.setTooltip(currentParameter);
-        statusDisplay.showMessage("LFO->" + currentParameter);
-        synthPage->isLfoActive = true;
-        synthPage->repaint();
-    }
     else if (button == &clearFingersButton)
     {
         if (!isPythonOn)
@@ -1282,7 +1152,6 @@ void CMProjectAudioProcessorEditor::buttonClicked(juce::Button* button)
         clearCircle(middleButton);
         clearCircle(ringButton);
         clearCircle(pinkyButton);
-        clearCircle(lfoParamButton);
         audioProcessor.processingSender.send("/clearSynth");
 
         auto clearGlow = [this](juce::ImageComponent& glow)
@@ -1295,8 +1164,6 @@ void CMProjectAudioProcessorEditor::buttonClicked(juce::Button* button)
         clearGlow(middleGlow);
         clearGlow(ringGlow);
         clearGlow(pinkyGlow);
-        synthPage->isLfoActive = false;
-        synthPage->repaint();
 
         statusDisplay.showMessage("Finger mappings cleared");
     }

@@ -73,7 +73,6 @@ public:
     float getDensity() const { return density.load(); }
     float getPitch() const { return pitch.load(); }
     float getReverse() const { return reverse.load(); }
-    float getlfoRate() const{ return lfoRate.load(); }
     
     void setGrainDur(float x)  { grainDur.store(x); }
     void setGrainPos(float x) { grainPos.store(x); }
@@ -81,7 +80,6 @@ public:
     void setDensity(float x)  { density.store(x);}
     void setPitch(float x) { pitch.store(x); }
     void setReverse(float x)  { reverse.store(x);}
-    void setlfoRate(float x) { lfoRate.store(x); }
 
     void updateParameters();
     void loadSynthSample(const juce::File& file);
@@ -116,7 +114,6 @@ private:
     std::atomic<float> density{ 0.8f };
     std::atomic<float> pitch{ 0.0f };
     std::atomic<float> reverse{ 0.0f };
-    std::atomic<float> lfoRate{0.0f};
     std::atomic<float> currentBpm{ 120.0f };
     
 

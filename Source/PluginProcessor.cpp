@@ -125,9 +125,9 @@ void CMProjectAudioProcessor::changeProgramName (int index, const juce::String& 
 void CMProjectAudioProcessor::oscMessageReceived(const juce::OSCMessage& message)
 {
     const auto address = message.getAddressPattern().toString();
-    if (address == "/handGrain" && message.size() == 7 &&
+    if (address == "/handGrain" && message.size() >= 6 &&
         message[0].isFloat32() && message[1].isFloat32() && message[2].isFloat32() &&
-        message[3].isFloat32() && message[4].isFloat32() && message[5].isFloat32() && message[6].isFloat32())
+        message[3].isFloat32() && message[4].isFloat32() && message[5].isFloat32())
     {
         grainDur = message[0].getFloat32();
         grainPos = message[1].getFloat32();
@@ -135,7 +135,6 @@ void CMProjectAudioProcessor::oscMessageReceived(const juce::OSCMessage& message
         density = message[3].getFloat32();
         pitch = message[4].getFloat32();
         reverse = message[5].getFloat32();
-        lfoRate = message[6].getFloat32();
 
     }
     
@@ -160,7 +159,6 @@ void CMProjectAudioProcessor::updateParameters() {
     density.store(0.8f); 
     pitch.store(0.0f); 
     reverse.store(0.0); 
-    lfoRate.store(0.0f); 
 
 }
 
