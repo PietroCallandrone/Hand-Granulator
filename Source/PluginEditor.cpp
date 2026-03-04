@@ -257,18 +257,16 @@ public:
 // Synth Page Component (Granular Synth UI)
 // ==================================================
 
-class CMProjectAudioProcessorEditor::SynthPageComponent : public juce::Component, private juce::ChangeListener, private juce::Slider::Listener, public juce::FileDragAndDropTarget
+class CMProjectAudioProcessorEditor::SynthPageComponent : public juce::Component, private juce::ChangeListener, public juce::FileDragAndDropTarget
 {
 public:
     juce::TextButton startButton, stopButton, startCamera, stopCamera, loadSampleButton; //StartSynth, StopSynth, StartCamera, StopCamera
     juce::TextButton recordMidiButton{ "Record MIDI" }, stopMidiButton{ "Stop Recording" }, saveMidiButton{ "Save MIDI" }; //Midi buttons
     HDImageButton grainPos, grainDur, grainDensity, grainReverse, grainCutOff, grainPitch, lfoRate; //Hd images for granulator parameters
     juce::Image startImg, stopImg; //Start and Stop Images
-    juce::Slider attackSlider, decaySlider, sustainSlider, releaseSlider; //Adsr sliders
-    juce::Label  attackLabel, decayLabel, sustainLabel, releaseLabel, granulatorTitle, extraTitleLabel; //Labels for the adsr and granulator
+    juce::Label granulatorTitle;
     juce::File currentSampleFile, originalSampleFile; //Reversed- not reversed file
     bool isReversed = false; //Boolean to handle when the sample is reversed or not
-    juce::Rectangle<int> adsrBoxArea; //Adsr knobs area
     float currentGrainPos = 0.0f; //Current grain position value
     float sampleDuration = 1.0f; //default, will be updated
     bool isLfoActive = false;
@@ -284,8 +282,6 @@ public:
         setButtonsAndLookAndFeel();//Function that sets the buttons and the different look and feel
         addSynthPageComponents(); //Function that adds all the synthpage components and makes them visible
         onClickSynthFunction(); //Function that handles all one click functions for the synthpage
-        adsrSetup();  //Function that handles adsr setup
-        adsrTitleSet(); //Function that sets the style of the adsr title
         resetButton.setButtonText("Reset");
         resetButton.setTooltip("Reset all parameters");
         addAndMakeVisible(resetButton);
@@ -306,17 +302,6 @@ public:
         
         thumbnail.removeChangeListener(this);
     }
-    void adsrTitleSet() {
-        extraTitleLabel.setText("ADSR Envelope", juce::dontSendNotification);
-        extraTitleLabel.setFont(juce::Font("Arial", 20.0f, juce::Font::bold));
-        extraTitleLabel.setColour(juce::Label::textColourId, juce::Colours::limegreen.withBrightness(1.2f));
-        extraTitleLabel.setJustificationType(juce::Justification::centredLeft);
-        //same glow effect
-        auto* shadow2 = new juce::DropShadowEffect();
-        shadow2->setShadowProperties(juce::DropShadow(juce::Colours::limegreen.withAlpha(0.4f), 4.0f, { 1, 1 }));
-        extraTitleLabel.setComponentEffect(shadow2);
-    }
-
     void addSynthPageComponents()
     {
         addAndMakeVisible(startButton);
@@ -335,7 +320,6 @@ public:
         addAndMakeVisible(grainReverse);
         addAndMakeVisible(lfoRate);
         addAndMakeVisible(granulatorTitle);
-        addAndMakeVisible(extraTitleLabel);
         addAndMakeVisible(lfoLinkLine);
         lfoLinkLine.setInterceptsMouseClicks(false, false);
 
@@ -355,20 +339,6 @@ public:
         setupImageButton(grainReverse, grainReverseFile);
         juce::File lfoRateFile = getIconFile("lfo.png");
         setupImageButton(lfoRate, lfoRateFile);
-
-
-        //Load and apply the image for ADSR knobs
-        juce::File knobFile = getIconFile("realknob.png"); //make sure the name matches the asset
-        if (!knobFile.existsAsFile())
-            DBG("❌ realknob.png not found at: " + knobFile.getFullPathName());
-        else
-        {
-            juce::Image img = juce::ImageFileFormat::loadFrom(knobFile);
-            if (img.isNull())
-                DBG("❌ Failed to load realknob.png");
-            else
-                adsrKnobLookAndFeel.setKnobImage(img);
-        }
 
     }
 
@@ -432,154 +402,8 @@ public:
         granulatorTitle.setComponentEffect(shadow);
     }
 
-    void adsrSetup() {
-        auto addADSR = [&](juce::Slider& s, juce::Label& l, const juce::String& text)
-            {
-                s.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-                s.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
-                s.setRange(0.0, 5.0, 0.001);
-                s.setLookAndFeel(&adsrKnobLookAndFeel);
-                s.addListener(this);
-                l.setText(text, juce::dontSendNotification);
-                l.attachToComponent(&s, true);
-                l.setJustificationType(juce::Justification::centredRight);
-                addAndMakeVisible(s);
-                addAndMakeVisible(l);
-            };
-
-        addADSR(attackSlider, attackLabel, "A");
-        addADSR(decaySlider, decayLabel, "D");
-        sustainSlider.setRange(0.0, 1.0, 0.001);     // ← here!
-        addADSR(sustainSlider, sustainLabel, "S");
-        addADSR(releaseSlider, releaseLabel, "R");
-
-        //Apply BPM-style font and color to ADSR labels
-        auto styleADSRLabel = [](juce::Label& label)
-            {
-                label.setFont(juce::Font(15.5f, juce::Font::bold));
-                label.setColour(juce::Label::textColourId, juce::Colours::lightgrey.withAlpha(0.85f));
-                label.setJustificationType(juce::Justification::centredRight); // already used
-            };
-
-        //Call after addADSR
-        styleADSRLabel(attackLabel);
-        styleADSRLabel(decayLabel);
-        styleADSRLabel(sustainLabel);
-        styleADSRLabel(releaseLabel);
-
-        //give defaults to match SC defaults:
-        attackSlider.setValue(0.01);
-        decaySlider.setValue(0.1);
-        sustainSlider.setValue(0.85);
-        releaseSlider.setValue(0.2);
-    }
-
     void paint(juce::Graphics& g) override
     {
-        // ==============================
-        // ADSR BOX BACKGROUND VISUALS
-        // ==============================
-        {
-            juce::Graphics::ScopedSaveState adsrClipState(g); //restores clipping at the end
-
-            juce::Path adsrClip;
-            adsrClip.addRoundedRectangle(adsrBoxArea.toFloat(), 8.0f);
-            g.reduceClipRegion(adsrClip);
-
-            juce::Colour adsrDark = juce::Colour::fromRGB(20, 20, 20);
-            juce::Colour adsrLight = juce::Colour::fromRGB(40, 40, 40);
-            juce::ColourGradient adsrBg(
-                adsrDark, adsrBoxArea.getX(), adsrBoxArea.getBottom(),
-                adsrLight, adsrBoxArea.getX(), adsrBoxArea.getY(), false
-            );
-            g.setGradientFill(adsrBg);
-            g.fillRect(adsrBoxArea);
-
-            auto adsrGlass = adsrBoxArea.withHeight(adsrBoxArea.getHeight() / 4);
-            juce::ColourGradient glassGradientADSR(
-                juce::Colours::white.withAlpha(0.2f),
-                adsrGlass.getX(), adsrGlass.getY(),
-                juce::Colours::transparentWhite,
-                adsrGlass.getX(), adsrGlass.getBottom(),
-                false
-            );
-            g.setGradientFill(glassGradientADSR);
-            g.fillRect(adsrGlass);
-        }
-
-
-        // === ADSR SHAPE DRAWING ===
-        juce::Path adsrPath;
-
-        // Get current ADSR values from sliders
-        float atk = (float)attackSlider.getValue();
-        float dec = (float)decaySlider.getValue();
-        float sus = (float)sustainSlider.getValue();
-        float rel = (float)releaseSlider.getValue();
-
-        const float susDisplayFrac = 0.20f;   // or make this dynamic as above
-        const float sumADR = atk + dec + rel + 1e-6f;
-
-        auto box = adsrBoxArea.toFloat().reduced(12.0f, 8.0f);
-        float x0 = box.getX(), y0 = box.getY() + box.getHeight();
-        float w = box.getWidth(), h = box.getHeight();
-
-        // explicitly carve up the box
-        float availW = w * (1.0f - susDisplayFrac);
-        float aW = atk / sumADR * availW;
-        float dW = dec / sumADR * availW;
-        float rW = rel / sumADR * availW;
-
-        float x1 = x0 + aW;
-        float x2 = x1 + dW;
-        float x3 = x2 + susDisplayFrac * w;
-        float x4 = x3 + rW;
-
-        // vertical positions
-        float y1 = box.getY();
-        float rawSus = (float)sustainSlider.getValue();    // 0…5
-        sus = juce::jlimit(0.0f, 1.0f, rawSus / 5.0f);
-        float y2 = box.getY() + (1.0f - sus) * h;
-        //float y3 = y0;
-        float sustainCurve = h * 0.05f;
-        // build a smooth path
-        adsrPath.startNewSubPath(x0, y0);
-        adsrPath.lineTo(x1, y1);
-
-        // 2) Decay lineare
-        adsrPath.lineTo(x2, y2);
-        //Sustain
-        adsrPath.lineTo(x3, y2);
-
-        // release curve:
-        adsrPath.quadraticTo(
-            x3 + 0.5f * (x4 - x3),
-            y2 + 0.5f * (y0 - y2),
-            x4, y0
-        );
-
-        // 4) Stampe come prima, con end-cap e joint arrotondati
-        g.setColour(juce::Colours::limegreen.withBrightness(1.3f));
-        g.strokePath(
-            adsrPath,
-            juce::PathStrokeType(
-                2.0f,
-                juce::PathStrokeType::JointStyle::curved,
-                juce::PathStrokeType::EndCapStyle::rounded
-            )
-        );
-
-        g.setColour(juce::Colours::yellow);
-        float dotR = 3.0f;
-
-        // five key points: (x0,y0), (x1,y1), (x2,y2), (x3,y2), (x4,y0)
-        struct Pt { float x, y; };
-        Pt pts[] = { {x0,y0}, {x1,y1}, {x2,y2}, {x3,y2}, {x4,y0} };
-
-        for (auto& p : pts)
-            g.fillEllipse(p.x - dotR, p.y - dotR,
-                dotR * 2.0f, dotR * 2.0f);
-
         // ==============================
         // WAVEFORM BACKGROUND VISUALS
         // ==============================
@@ -629,18 +453,6 @@ public:
             g.setGradientFill(glassGradient);
             g.fillRect(glassRect);
         }
-    }
-
-    //function that handles the change of the sliders value
-    void sliderValueChanged(juce::Slider* s) override
-    {
-        //only ADSR sliders live here
-        float atk = (float)attackSlider.getValue();
-        float dec = (float)decaySlider.getValue();
-        float sus = (float)sustainSlider.getValue();
-        float rel = (float)releaseSlider.getValue();
-        processor.setSynthADSR(atk, dec, sus, rel);
-        repaint(); //Paint again the wave
     }
 
     //function that reverses the sample
@@ -721,25 +533,6 @@ public:
         loadSampleButton.setBounds(40-16, topY+50, 100, 30);
         resetButton.setBounds(132, topY + 50, 80, 30);
         area.removeFromTop(30);
-
-        //ADSR KNOBS POSITIONING - 2x2 layout
-        int knobSize = 62;
-        int spacingX = knobSize + 80; //horizontal space between columns
-        int spacingY = knobSize + 20; //vertical space between rows
-
-        int baseX = getWidth() - (2 * knobSize + 120);
-        int baseY = getHeight() - (2 * spacingY + 156);
-        int offsetTopRow = 12; //shift A and D knobs down of x pixels
-
-        //First row (A and D)
-        attackSlider.setBounds(baseX, baseY + offsetTopRow, knobSize, knobSize); // top-left
-        decaySlider.setBounds(baseX + spacingX, baseY + offsetTopRow, knobSize, knobSize); // top-right
-
-        //Second row (S and R)
-        sustainSlider.setBounds(baseX, baseY + spacingY, knobSize, knobSize); // bottom-left
-        releaseSlider.setBounds(baseX + spacingX, baseY + spacingY, knobSize, knobSize); // bottom-right
-        const int sliderHeight = 30;
-        const int gap = 20;
        
         //single row for all buttons
         auto buttonRow = area.removeFromTop(30);
@@ -771,10 +564,6 @@ public:
         int waveformHeight = 140;
         waveformArea = area.removeFromTop(waveformHeight);
         granulatorTitle.setBounds(20, 350, 300, 30);  //Granulator title
-        //envelope title
-        extraTitleLabel.setBounds(687, 355, 200, 30); 
-        //adsr box 
-        adsrBoxArea = juce::Rectangle<int>(689, 551, 230, 130);  // x, y, width, height
 
 
         //lfo line position
@@ -935,7 +724,6 @@ private:
     StopMidiButtonLookAndFeel stopMidiLookAndFeel;
     StartButtonLookAndFeel  startButtonLookAndFeel;
     StopButtonLookAndFeel   stopButtonLookAndFeel;
-    ImageKnobLookAndFeel adsrKnobLookAndFeel;
     juce::Component lfoLinkLine;
 
 
@@ -1523,10 +1311,6 @@ void CMProjectAudioProcessorEditor::setToolTipFunction() {
     synthPage->saveMidiButton.setTooltip("Save Midi recording");
     synthPage->loadSampleButton.setTooltip("Load your sample");
     synthPage->stopCamera.setTooltip("Stop Camera");
-    synthPage->attackSlider.setTooltip("Attack\n Time to reach peak");
-    synthPage->decaySlider.setTooltip("Decay\n Time to fall to sustain level");
-    synthPage->sustainSlider.setTooltip("Sustain\n Level held until release");
-    synthPage->releaseSlider.setTooltip("Release\n Time to fade out");
     drumPage->startCamera.setTooltip("Start Camera");
     drumPage->stopCamera.setTooltip("Stop Camera");
 
