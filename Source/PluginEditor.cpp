@@ -251,8 +251,6 @@ public:
         g.setGradientFill(background);
         g.fillRoundedRectangle(bounds, 28.0f);
 
-        drawBackgroundField(g, bounds);
-
         const auto scene = getSceneBounds();
 
         g.setColour(juce::Colours::white.withAlpha(0.06f));
@@ -345,54 +343,6 @@ private:
         if (parameter == "GrainReverse") return juce::Colour::fromRGB(244, 250, 255);
         if (parameter == "lfoRate")      return juce::Colour::fromRGB(196, 134, 255);
         return juce::Colours::white;
-    }
-
-    void drawBackgroundField(juce::Graphics& g, const juce::Rectangle<float>& bounds) const
-    {
-        juce::Path web;
-        std::array<juce::Point<float>, 18> nodes {};
-
-        for (size_t i = 0; i < nodes.size(); ++i)
-        {
-            const auto phase = (float) timeSeconds * 0.22f + (float) i * 0.41f;
-            const auto x = bounds.getCentreX()
-                + std::sin(phase * (0.9f + (float) i * 0.01f)) * bounds.getWidth() * 0.42f;
-            const auto y = bounds.getCentreY()
-                + std::cos(phase * (1.1f + (float) i * 0.015f) + (float) i) * bounds.getHeight() * 0.38f;
-
-            nodes[i] = { x, y };
-        }
-
-        for (size_t i = 0; i < nodes.size(); ++i)
-        {
-            for (size_t j = i + 1; j < nodes.size(); ++j)
-            {
-                const auto distance = nodes[i].getDistanceFrom(nodes[j]);
-
-                if (distance > bounds.getWidth() * 0.22f)
-                    continue;
-
-                web.startNewSubPath(nodes[i]);
-                web.lineTo(nodes[j]);
-            }
-        }
-
-        g.setColour(juce::Colour::fromRGB(30, 255, 192).withAlpha(0.06f + modulationEnergy * 0.08f));
-        g.strokePath(web, juce::PathStrokeType(1.1f));
-
-        for (const auto& node : nodes)
-        {
-            const auto radius = 2.0f + 2.0f * modulationEnergy;
-            juce::ColourGradient glow(
-                juce::Colour::fromRGB(120, 255, 220).withAlpha(0.22f),
-                node.x, node.y,
-                juce::Colours::transparentBlack,
-                node.x + radius * 4.0f, node.y + radius * 4.0f,
-                true);
-
-            g.setGradientFill(glow);
-            g.fillEllipse(node.x - radius * 2.0f, node.y - radius * 2.0f, radius * 4.0f, radius * 4.0f);
-        }
     }
 
     void drawHand(juce::Graphics& g,
