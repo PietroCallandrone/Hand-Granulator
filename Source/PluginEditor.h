@@ -113,8 +113,10 @@ public:
 private:
 
     class SynthPageComponent;
+    class HandVisualizerComponent;
     LoadButtonLookAndFeel clearFingerButtonLookAndFeel;
     std::unique_ptr<GridBackgroundComponent> background;
+    std::unique_ptr<HandVisualizerComponent> handVisualizer;
     CMProjectAudioProcessor& audioProcessor;
     juce::ImageComponent handOverlay;
     SynthPageComponent* synthPage = nullptr;

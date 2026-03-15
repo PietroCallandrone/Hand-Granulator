@@ -178,6 +178,338 @@ static juce::File getHandImageFile()
     return projectRoot.getChildFile("Assets").getChildFile("handimage.png"); //Append the image of hands
 }
 
+class CMProjectAudioProcessorEditor::HandVisualizerComponent : public juce::Component
+{
+public:
+    explicit HandVisualizerComponent(CMProjectAudioProcessor& processorToUse)
+        : processor(processorToUse)
+    {
+        setInterceptsMouseClicks(false, false);
+    }
+
+    void tick(double newTimeSeconds)
+    {
+        timeSeconds = newTimeSeconds;
+        modulationEnergy = juce::jlimit(0.0f, 1.0f,
+            (processor.getDensity() / 5.0f) * 0.35f
+            + (std::abs(processor.getPitch()) / 12.0f) * 0.2f
+            + (processor.getReverse() * 0.2f)
+            + (processor.getGrainDur() / 0.5f) * 0.25f);
+
+        reverseAmount = juce::jlimit(0.0f, 1.0f, processor.getReverse());
+
+        const auto snapshot = processor.getTrackedHands();
+
+        for (size_t handIndex = 0; handIndex < hands.size(); ++handIndex)
+        {
+            auto& displayState = hands[handIndex];
+            const auto& trackedHand = snapshot[handIndex];
+
+            if (trackedHand.visible)
+            {
+                if (! displayState.seeded)
+                {
+                    displayState.smoothed = trackedHand.landmarks;
+                    displayState.seeded = true;
+                }
+                else
+                {
+                    for (size_t pointIndex = 0; pointIndex < displayState.smoothed.size(); ++pointIndex)
+                    {
+                        auto current = displayState.smoothed[pointIndex];
+                        const auto target = trackedHand.landmarks[pointIndex];
+                        displayState.smoothed[pointIndex] = {
+                            juce::jmap(0.28f, current.x, target.x),
+                            juce::jmap(0.28f, current.y, target.y)
+                        };
+                    }
+                }
+            }
+
+            displayState.visible = trackedHand.visible;
+            displayState.visibility = juce::jlimit(0.0f, 1.0f,
+                displayState.visibility + (trackedHand.visible ? 0.12f : -0.08f));
+
+            if (! trackedHand.visible && displayState.visibility <= 0.01f)
+                displayState.seeded = false;
+        }
+
+        repaint();
+    }
+
+    void paint(juce::Graphics& g) override
+    {
+        auto bounds = getLocalBounds().toFloat();
+
+        juce::ColourGradient background(
+            juce::Colour::fromRGB(8, 10, 12),
+            bounds.getCentreX(), bounds.getY(),
+            juce::Colour::fromRGB(2, 5, 7),
+            bounds.getCentreX(), bounds.getBottom(),
+            false);
+
+        g.setGradientFill(background);
+        g.fillRoundedRectangle(bounds, 28.0f);
+
+        drawBackgroundField(g, bounds);
+
+        const auto scene = getSceneBounds();
+
+        g.setColour(juce::Colours::white.withAlpha(0.06f));
+        g.drawRoundedRectangle(scene, 24.0f, 1.0f);
+
+        bool hasVisibleHands = false;
+
+        for (size_t handIndex = 0; handIndex < hands.size(); ++handIndex)
+        {
+            if (hands[handIndex].visibility <= 0.01f)
+                continue;
+
+            hasVisibleHands = true;
+            drawHand(g, scene, (int) handIndex, hands[handIndex]);
+        }
+
+        if (! hasVisibleHands)
+        {
+            g.setColour(juce::Colours::white.withAlpha(0.35f));
+            g.setFont(juce::Font { juce::FontOptions(16.0f) });
+            g.drawFittedText("Start camera to render live hand visuals inside the plugin",
+                scene.reduced(24.0f).toNearestInt(),
+                juce::Justification::centredBottom,
+                2);
+        }
+    }
+
+private:
+    struct VisualHand
+    {
+        bool visible = false;
+        bool seeded = false;
+        float visibility = 0.0f;
+        std::array<juce::Point<float>, 21> smoothed {};
+    };
+
+    static constexpr int handConnections[][2] = {
+        { 0, 1 }, { 1, 2 }, { 2, 3 }, { 3, 4 }, { 0, 5 },
+        { 5, 6 }, { 6, 7 }, { 7, 8 }, { 5, 9 }, { 9, 10 },
+        { 10, 11 }, { 11, 12 }, { 9, 13 }, { 13, 14 }, { 14, 15 },
+        { 15, 16 }, { 13, 17 }, { 17, 18 }, { 18, 19 }, { 19, 20 },
+        { 0, 17 }, { 5, 17 }
+    };
+
+    juce::Rectangle<float> getSceneBounds() const
+    {
+        auto available = getLocalBounds().toFloat().reduced(18.0f, 10.0f);
+        constexpr float aspect = 4.0f / 3.0f;
+
+        auto width = available.getWidth();
+        auto height = width / aspect;
+
+        if (height > available.getHeight())
+        {
+            height = available.getHeight();
+            width = height * aspect;
+        }
+
+        return {
+            available.getCentreX() - width * 0.5f,
+            available.getCentreY() - height * 0.5f,
+            width,
+            height
+        };
+    }
+
+    juce::Point<float> mapPoint(const juce::Rectangle<float>& scene, juce::Point<float> point) const
+    {
+        return {
+            scene.getX() + point.x * scene.getWidth(),
+            scene.getY() + point.y * scene.getHeight()
+        };
+    }
+
+    juce::Colour getHandColour(int handIndex, float alpha) const
+    {
+        const auto hue = handIndex == 0 ? 0.53f : 0.30f;
+        const auto saturation = juce::jmap(modulationEnergy, 0.35f, 0.9f);
+        const auto brightness = juce::jmap(1.0f - reverseAmount, 0.78f, 1.0f);
+        return juce::Colour::fromHSV(hue, saturation, brightness, alpha);
+    }
+
+    juce::Colour getParameterColour(const juce::String& parameter) const
+    {
+        if (parameter == "GrainPos")     return juce::Colour::fromRGB(84, 240, 255);
+        if (parameter == "GrainDur")     return juce::Colour::fromRGB(255, 192, 92);
+        if (parameter == "GrainDensity") return juce::Colour::fromRGB(108, 255, 140);
+        if (parameter == "GrainPitch")   return juce::Colour::fromRGB(255, 122, 214);
+        if (parameter == "GrainCutOff")  return juce::Colour::fromRGB(120, 168, 255);
+        if (parameter == "GrainReverse") return juce::Colour::fromRGB(244, 250, 255);
+        if (parameter == "lfoRate")      return juce::Colour::fromRGB(196, 134, 255);
+        return juce::Colours::white;
+    }
+
+    void drawBackgroundField(juce::Graphics& g, const juce::Rectangle<float>& bounds) const
+    {
+        juce::Path web;
+        std::array<juce::Point<float>, 18> nodes {};
+
+        for (size_t i = 0; i < nodes.size(); ++i)
+        {
+            const auto phase = (float) timeSeconds * 0.22f + (float) i * 0.41f;
+            const auto x = bounds.getCentreX()
+                + std::sin(phase * (0.9f + (float) i * 0.01f)) * bounds.getWidth() * 0.42f;
+            const auto y = bounds.getCentreY()
+                + std::cos(phase * (1.1f + (float) i * 0.015f) + (float) i) * bounds.getHeight() * 0.38f;
+
+            nodes[i] = { x, y };
+        }
+
+        for (size_t i = 0; i < nodes.size(); ++i)
+        {
+            for (size_t j = i + 1; j < nodes.size(); ++j)
+            {
+                const auto distance = nodes[i].getDistanceFrom(nodes[j]);
+
+                if (distance > bounds.getWidth() * 0.22f)
+                    continue;
+
+                web.startNewSubPath(nodes[i]);
+                web.lineTo(nodes[j]);
+            }
+        }
+
+        g.setColour(juce::Colour::fromRGB(30, 255, 192).withAlpha(0.06f + modulationEnergy * 0.08f));
+        g.strokePath(web, juce::PathStrokeType(1.1f));
+
+        for (const auto& node : nodes)
+        {
+            const auto radius = 2.0f + 2.0f * modulationEnergy;
+            juce::ColourGradient glow(
+                juce::Colour::fromRGB(120, 255, 220).withAlpha(0.22f),
+                node.x, node.y,
+                juce::Colours::transparentBlack,
+                node.x + radius * 4.0f, node.y + radius * 4.0f,
+                true);
+
+            g.setGradientFill(glow);
+            g.fillEllipse(node.x - radius * 2.0f, node.y - radius * 2.0f, radius * 4.0f, radius * 4.0f);
+        }
+    }
+
+    void drawHand(juce::Graphics& g,
+                  const juce::Rectangle<float>& scene,
+                  int handIndex,
+                  const VisualHand& hand) const
+    {
+        const auto baseColour = getHandColour(handIndex, 0.95f * hand.visibility);
+        const auto palmColour = baseColour.withAlpha(0.10f * hand.visibility);
+
+        juce::Path palm;
+        palm.startNewSubPath(mapPoint(scene, hand.smoothed[0]));
+        palm.lineTo(mapPoint(scene, hand.smoothed[5]));
+        palm.lineTo(mapPoint(scene, hand.smoothed[9]));
+        palm.lineTo(mapPoint(scene, hand.smoothed[13]));
+        palm.lineTo(mapPoint(scene, hand.smoothed[17]));
+        palm.closeSubPath();
+
+        g.setColour(palmColour);
+        g.fillPath(palm);
+
+        for (const auto& connection : handConnections)
+        {
+            const auto start = mapPoint(scene, hand.smoothed[(size_t) connection[0]]);
+            const auto end = mapPoint(scene, hand.smoothed[(size_t) connection[1]]);
+            const auto distance = start.getDistanceFrom(end);
+            const auto thickness = juce::jmap(distance, 10.0f, 140.0f, 7.0f, 14.0f) * hand.visibility;
+
+            g.setColour(baseColour.withAlpha(0.10f * hand.visibility));
+            g.drawLine({ start, end }, thickness + 8.0f);
+
+            g.setColour(baseColour.withAlpha(0.55f * hand.visibility));
+            g.drawLine({ start, end }, thickness);
+
+            g.setColour(juce::Colours::white.withAlpha(0.22f * hand.visibility));
+            g.drawLine({ start, end }, juce::jmax(1.0f, thickness * 0.18f));
+        }
+
+        for (size_t pointIndex = 0; pointIndex < hand.smoothed.size(); ++pointIndex)
+        {
+            const auto mapped = mapPoint(scene, hand.smoothed[pointIndex]);
+            const bool isFingerTip = pointIndex == 4 || pointIndex == 8 || pointIndex == 12
+                                     || pointIndex == 16 || pointIndex == 20;
+            const auto radius = isFingerTip ? 7.0f : 4.2f;
+
+            juce::Colour pointColour = baseColour;
+
+            if (handIndex == 1)
+            {
+                const std::array<int, 4> synthTipIndices { 8, 12, 16, 20 };
+
+                for (size_t i = 0; i < synthTipIndices.size(); ++i)
+                {
+                    if ((int) pointIndex == synthTipIndices[i] && processor.fingerControls[i].isNotEmpty())
+                        pointColour = getParameterColour(processor.fingerControls[i]);
+                }
+            }
+
+            juce::ColourGradient pointGlow(
+                pointColour.withAlpha(isFingerTip ? 0.35f * hand.visibility : 0.22f * hand.visibility),
+                mapped.x, mapped.y,
+                juce::Colours::transparentBlack,
+                mapped.x + radius * 5.0f, mapped.y + radius * 5.0f,
+                true);
+
+            g.setGradientFill(pointGlow);
+            g.fillEllipse(mapped.x - radius * 2.5f, mapped.y - radius * 2.5f, radius * 5.0f, radius * 5.0f);
+
+            g.setColour(pointColour.withAlpha(0.95f * hand.visibility));
+            g.fillEllipse(mapped.x - radius, mapped.y - radius, radius * 2.0f, radius * 2.0f);
+        }
+
+        if (handIndex == 1)
+            drawAssignedParameterLabels(g, scene, hand);
+    }
+
+    void drawAssignedParameterLabels(juce::Graphics& g,
+                                     const juce::Rectangle<float>& scene,
+                                     const VisualHand& hand) const
+    {
+        const std::array<int, 4> tipIndices { 8, 12, 16, 20 };
+
+        for (size_t i = 0; i < tipIndices.size(); ++i)
+        {
+            const auto& parameter = processor.fingerControls[i];
+
+            if (parameter.isEmpty())
+                continue;
+
+            const auto tip = mapPoint(scene, hand.smoothed[(size_t) tipIndices[i]]);
+            const auto labelArea = juce::Rectangle<float>(0.0f, 0.0f, 112.0f, 24.0f)
+                .withCentre({ tip.x + 64.0f, tip.y - 16.0f });
+
+            const auto labelColour = getParameterColour(parameter);
+
+            g.setColour(juce::Colours::black.withAlpha(0.35f * hand.visibility));
+            g.fillRoundedRectangle(labelArea.translated(0.0f, 2.0f), 12.0f);
+
+            g.setColour(labelColour.withAlpha(0.22f * hand.visibility));
+            g.fillRoundedRectangle(labelArea, 12.0f);
+
+            g.setColour(labelColour.withAlpha(0.75f * hand.visibility));
+            g.drawRoundedRectangle(labelArea, 12.0f, 1.0f);
+
+            g.setColour(juce::Colours::white.withAlpha(0.94f * hand.visibility));
+            g.setFont(juce::Font { juce::FontOptions(12.0f) }.boldened());
+            g.drawFittedText(parameter, labelArea.toNearestInt(), juce::Justification::centred, 1);
+        }
+    }
+
+    CMProjectAudioProcessor& processor;
+    std::array<VisualHand, 2> hands;
+    double timeSeconds = 0.0;
+    float modulationEnergy = 0.0f;
+    float reverseAmount = 0.0f;
+};
+
 //borders of the plugin that light up periodically
 class GridBackgroundComponent : public juce::Component, private juce::Timer
 {
@@ -807,8 +1139,9 @@ CMProjectAudioProcessorEditor::~CMProjectAudioProcessorEditor()
 void CMProjectAudioProcessorEditor::startingConfigurationGlobal() {
     synthPage = new SynthPageComponent(audioProcessor);
     background = std::make_unique<GridBackgroundComponent>();
+    handVisualizer = std::make_unique<HandVisualizerComponent>(audioProcessor);
     addAndMakeVisible(background.get()); //comes before anything else
-
+    addAndMakeVisible(handVisualizer.get());
     addAndMakeVisible(synthPage);
 }
 void CMProjectAudioProcessorEditor::setToolTipFunction() {
@@ -913,6 +1246,7 @@ void CMProjectAudioProcessorEditor::loadHandiImageFromPath() {
             handImage.getHeight() * 2,
             juce::Graphics::highResamplingQuality),
             juce::RectanglePlacement::centred);
+        handOverlay.setAlpha(0.18f);
         addAndMakeVisible(handOverlay);
         handOverlay.setInterceptsMouseClicks(false, false);
     }
@@ -944,6 +1278,9 @@ void CMProjectAudioProcessorEditor::resized()
 {
     if (background)
         background->setBounds(getLocalBounds());
+
+    if (handVisualizer)
+        handVisualizer->setBounds(55, 365, 820, 340);
 
     auto fullArea = getLocalBounds();
 
@@ -1127,7 +1464,6 @@ void CMProjectAudioProcessorEditor::buttonClicked(juce::Button* button)
         indexButton.setTooltip(currentParameter);
         statusDisplay.showMessage("Index->" + currentParameter);
         assignGlowToFinger(currentParameter, indexGlow, { 591, 330 }, 20.0f, 73, 73);
-        audioProcessor.processingSender.send("/fingers_proc", 1);
     }
     else if (button == &middleButton)
     {
@@ -1140,7 +1476,6 @@ void CMProjectAudioProcessorEditor::buttonClicked(juce::Button* button)
         middleButton.setTooltip(currentParameter);
         statusDisplay.showMessage("Middle->" + currentParameter);
         assignGlowToFinger(currentParameter, middleGlow, { 532, 316 }, 6.0f, 72, 72);
-        audioProcessor.processingSender.send("/fingers_proc", 2);
     }
     else if (button == &ringButton)
     {
@@ -1153,7 +1488,6 @@ void CMProjectAudioProcessorEditor::buttonClicked(juce::Button* button)
         ringButton.setTooltip(currentParameter);
         statusDisplay.showMessage("Ring->" + currentParameter);
         assignGlowToFinger(currentParameter, ringGlow, { 474, 331 }, -10.0f, 72, 72);
-        audioProcessor.processingSender.send("/fingers_proc", 3);
     }
     else if (button == &pinkyButton)
     {
@@ -1166,7 +1500,6 @@ void CMProjectAudioProcessorEditor::buttonClicked(juce::Button* button)
         pinkyButton.setTooltip(currentParameter);
         statusDisplay.showMessage("Pinky->" + currentParameter);
         assignGlowToFinger(currentParameter, pinkyGlow, { 437, 382 }, -25.0f, 68, 68);
-        audioProcessor.processingSender.send("/fingers_proc", 4);
     }
     else if (button == &clearFingersButton)
     {
@@ -1191,7 +1524,6 @@ void CMProjectAudioProcessorEditor::buttonClicked(juce::Button* button)
         clearCircle(middleButton);
         clearCircle(ringButton);
         clearCircle(pinkyButton);
-        audioProcessor.processingSender.send("/clearSynth");
 
         auto clearGlow = [this](juce::ImageComponent& glow)
         {
@@ -1341,24 +1673,22 @@ void CMProjectAudioProcessorEditor::stopPythonHandTracker()
     }
     cameraRunning = false;
     isPythonOn = false;
+    audioProcessor.clearTrackedHands();
+
+    if (handVisualizer)
+        handVisualizer->repaint();
 }
 
 //This function controls if the camera has been closed from the X
 void CMProjectAudioProcessorEditor::timerCallback()
 {
-
-    auto& p = audioProcessor;
-    float dur = p.getGrainDur();
-    float pos = p.getGrainPos();
-    float cut = p.getCutoff();
-    float den = p.getDensity();
-    float pit = p.getPitch();
-    float rev = p.getReverse();
-
     if (synthPage)
     {
         synthPage->currentGrainPos = audioProcessor.getGrainPos();
     }
+
+    if (handVisualizer)
+        handVisualizer->tick(juce::Time::getMillisecondCounterHiRes() * 0.001);
 
     synthPage->repaint(); //force waveform + bar to redraw
 
@@ -1369,6 +1699,7 @@ void CMProjectAudioProcessorEditor::timerCallback()
         synthPage->startCamera.setEnabled(true);
         synthPage->stopCamera.setEnabled(false);
         isPythonOn = false;
+        audioProcessor.clearTrackedHands();
 
         auto output = pythonProcess.readAllProcessOutput().trim();
 

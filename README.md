@@ -67,3 +67,29 @@ As the user begins to modulate parameters with their hand, JUCE communicates wit
 
 Each component in the system has a clearly defined role: **Python handles the hand-tracking logic**, **JUCE manages the plugin interface and all parameter mapping/effect logic**, **SuperCollider performs the audio synthesis**, and **Processing renders a dynamic, stylized visual representation of the user’s hands**, reacting in real time to both movement and parameter modulation. This modular yet tightly integrated architecture allows for a smooth and expressive performance experience, turning gestures into sound with immediacy and visual feedback.
 
+---
+
+## Hand Tracker Python Environment
+
+The hand-tracking script is designed to run from a dedicated **conda** environment named `handtracker-env`. The pinned package set lives in:
+
+- `python/HandTracker/environment.yml`
+- `python/HandTracker/requirements.txt`
+
+To create the environment from scratch:
+
+```bash
+cd Hand-Granulator
+conda env create -f python/HandTracker/environment.yml
+conda activate handtracker-env
+```
+
+To update an existing environment and remove stale packages that are no longer part of the tracked setup:
+
+```bash
+cd Hand-Granulator
+conda env update -n handtracker-env -f python/HandTracker/environment.yml --prune
+conda activate handtracker-env
+```
+
+On macOS, if the camera does not open, grant Camera access to the application that launches the tracker (the standalone app, DAW host, or Terminal if you are testing manually) in **System Settings > Privacy & Security > Camera**, then relaunch that app.

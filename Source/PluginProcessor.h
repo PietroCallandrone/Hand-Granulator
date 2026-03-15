@@ -8,6 +8,7 @@
 
 #pragma once
 #include <JuceHeader.h>
+#include <array>
 #include <vector>
 
 //==============================================================================
@@ -86,8 +87,15 @@ public:
     void startManualSynthNote(int noteNumber, float velocity);
     void stopManualSynthNote(int noteNumber);
     void setCurrentBpm(float bpm) { currentBpm.store(juce::jmax(1.0f, bpm)); }
+    
+    struct TrackedHandState
+    {
+        bool visible = false;
+        std::array<juce::Point<float>, 21> landmarks {};
+    };
 
-    juce::OSCSender processingSender;
+    std::array<TrackedHandState, 2> getTrackedHands() const;
+    void clearTrackedHands();
     
 
 private:
@@ -115,6 +123,8 @@ private:
     std::atomic<float> pitch{ 0.0f };
     std::atomic<float> reverse{ 0.0f };
     std::atomic<float> currentBpm{ 120.0f };
+    mutable juce::CriticalSection trackedHandsLock;
+    std::array<TrackedHandState, 2> trackedHands;
     
 
 public:

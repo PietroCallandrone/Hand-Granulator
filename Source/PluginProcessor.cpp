@@ -125,6 +125,18 @@ void CMProjectAudioProcessor::changeProgramName (int index, const juce::String& 
 void CMProjectAudioProcessor::oscMessageReceived(const juce::OSCMessage& message)
 {
     const auto address = message.getAddressPattern().toString();
+
+    auto readFloatArg = [](const juce::OSCArgument& arg) -> float
+    {
+        if (arg.isFloat32())
+            return arg.getFloat32();
+
+        if (arg.isInt32())
+            return (float) arg.getInt32();
+
+        return 0.0f;
+    };
+
     if (address == "/handGrain" && message.size() >= 6 &&
         message[0].isFloat32() && message[1].isFloat32() && message[2].isFloat32() &&
         message[3].isFloat32() && message[4].isFloat32() && message[5].isFloat32())
@@ -136,6 +148,33 @@ void CMProjectAudioProcessor::oscMessageReceived(const juce::OSCMessage& message
         pitch = message[4].getFloat32();
         reverse = message[5].getFloat32();
 
+    }
+    else if (address == "/handState" && message.size() == 44 &&
+             message[0].isInt32() && message[1].isInt32())
+    {
+        const auto handIndex = message[0].getInt32();
+        const auto visible = message[1].getInt32() != 0;
+
+        if (juce::isPositiveAndBelow(handIndex, (int) trackedHands.size()))
+        {
+            TrackedHandState nextState;
+            nextState.visible = visible;
+
+            if (visible)
+            {
+                for (int i = 0; i < 21; ++i)
+                {
+                    const auto argIndex = 2 + i * 2;
+                    nextState.landmarks[(size_t) i] = {
+                        readFloatArg(message[argIndex]),
+                        readFloatArg(message[argIndex + 1])
+                    };
+                }
+            }
+
+            const juce::ScopedLock lock(trackedHandsLock);
+            trackedHands[(size_t) handIndex] = nextState;
+        }
     }
     
     else if (address == "/triggerDrum" && message.size() == 1 && message[0].isInt32())
@@ -174,22 +213,30 @@ void CMProjectAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlo
     pitchWheelSemitones = 0.0f;
     activeGrains.clear();
 
-    //formatManager.registerBasicFormats(); //Register WAV, AIFF, MP3 support
-
-    if(!processingSender.connect("127.0.0.1", 9003))
-        DBG("Could not connect to Processing");
-    else
-        DBG("Connected to Processing via OSC");
-        
     // Python receiver
     if (!oscReceiver.connect(9001)) // match Python port
         DBG("❌ Could not bind OSC receiver on 9001");
     else {
         oscReceiver.addListener(this, "/handGrain");
+        oscReceiver.addListener(this, "/handState");
         oscReceiver.addListener(this, "/triggerDrum");
         DBG("✅ JUCE OSC Receiver listening on port 9001");
     }
 
+}
+
+std::array<CMProjectAudioProcessor::TrackedHandState, 2> CMProjectAudioProcessor::getTrackedHands() const
+{
+    const juce::ScopedLock lock(trackedHandsLock);
+    return trackedHands;
+}
+
+void CMProjectAudioProcessor::clearTrackedHands()
+{
+    const juce::ScopedLock lock(trackedHandsLock);
+
+    for (auto& hand : trackedHands)
+        hand = {};
 }
 
 
@@ -498,7 +545,6 @@ void CMProjectAudioProcessor::spawnGrain()
 
     activeGrains.push_back(grain);
 }
-
 
 
 

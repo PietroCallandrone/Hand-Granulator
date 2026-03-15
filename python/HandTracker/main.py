@@ -4,152 +4,15 @@ import math
 import threading
 from pythonosc import udp_client, dispatcher, osc_server
 
-import subprocess
-import os
 import platform
-import shutil
 import sys
 
 from google.protobuf import __version__ as protobuf_version
-
-from pathlib import Path
-
-def launch_processing_sketch() -> subprocess.Popen | None:
-    """
-    Avvia uno sketch Processing da Python, sia su macOS che su Linux/Windows.
-    """
-    # 1) directory di questo script
-    base_dir = Path(__file__).resolve().parent
-
-    # 2) cartella dello sketch (non il .pde)
-    sketch_dir = (base_dir / "../Processing/hand_filter").resolve()
-    if not sketch_dir.is_dir():
-        print(f"[WARN] Processing sketch folder not found: {sketch_dir}")
-        return None
-
-    # 3) Enhanced Processing detection for macOS
-    processing_cmd = None
-    use_processing_cli = False
-    
-    if platform.system() == "Darwin":
-        # Try multiple common Processing locations on macOS
-        possible_paths = [
-            "/Applications/Processing.app/Contents/MacOS/processing-java",
-            "/Applications/Processing 4/Processing.app/Contents/MacOS/processing-java", 
-            "/usr/local/bin/processing-java",
-            shutil.which("processing-java")
-        ]
-        
-        for path in possible_paths:
-            if path and Path(path).exists():
-                processing_cmd = str(path)
-                break
-    elif platform.system() == "Windows":
-        # Processing 4 on Windows may not ship processing-java in PATH.
-        # Prefer legacy processing-java when available, then fallback to Processing.exe CLI.
-        possible_paths = [
-            shutil.which("processing-java"),
-            shutil.which("processing-java.exe"),
-            shutil.which("processing"),
-            shutil.which("processing.exe"),
-            r"C:\Program Files\Processing\Processing.exe",
-            r"C:\Program Files\Processing 4\Processing.exe",
-        ]
-
-        for path in possible_paths:
-            if path and Path(path).exists():
-                processing_cmd = str(path)
-                if Path(path).name.lower() == "processing.exe":
-                    use_processing_cli = True
-                break
-    else:
-        # Non-macOS/Linux systems
-        processing_cmd = shutil.which("processing-java")
-
-    if processing_cmd is None:
-        print(
-            "[WARN] processing-java not found. Continuing without Processing visuals."
-        )
-        return None
-
-    # 4) Make sure the sketch directory path is absolute and properly formatted
-    sketch_path = str(sketch_dir.resolve())
-    
-    # 5) Build command with explicit parameters
-    if use_processing_cli:
-        cmd = [
-            processing_cmd,
-            "cli",
-            f"--sketch={sketch_path}",
-            "--run",
-        ]
-    else:
-        cmd = [
-            processing_cmd,
-            f"--sketch={sketch_path}",
-            "--run",
-        ]
-
-    print("Processing command:", " ".join(cmd))
-    print("Sketch directory:", sketch_path)
-    print("Working directory:", os.getcwd())
-    
-    try:
-        # Set environment variables that might be missing when run from Xcode app
-        env = os.environ.copy()
-        
-        # Add common paths that might be missing
-        if platform.system() == "Darwin":
-            path_additions = [
-                "/usr/local/bin",
-                "/opt/homebrew/bin", 
-                "/Applications/Processing.app/Contents/MacOS"
-            ]
-            current_path = env.get("PATH", "")
-            for path_add in path_additions:
-                if path_add not in current_path:
-                    env["PATH"] = f"{current_path}:{path_add}"
-        
-        # Use absolute path for working directory
-        proc = subprocess.Popen(
-            cmd, 
-            shell=False,
-            env=env,
-            cwd=str(base_dir),  # Set working directory explicitly
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        
-        print("Processing sketch launched with PID", proc.pid)
-        
-        # Check if process started successfully
-        try:
-            # Wait a short time to see if process exits immediately with error
-            exit_code = proc.poll()
-            if exit_code is not None:
-                stdout, stderr = proc.communicate()
-                print(f"Process exited immediately with code {exit_code}")
-                print(f"STDOUT: {stdout.decode()}")
-                print(f"STDERR: {stderr.decode()}")
-                return None
-        except:
-            pass
-            
-        return proc
-
-    except Exception as e:
-        print("Error launching Processing sketch:", e)
-        print("Command that failed:", " ".join(cmd))
-        return None
-
 
 # === OSC CLIENTS ===
 
 # JUCE link
 client = udp_client.SimpleUDPClient("127.0.0.1", 9001)
-
-# Processing GUI
-processing_client = udp_client.SimpleUDPClient("127.0.0.1", 9003)
 
 # === GLOBAL STATE ===
 finger_to_param = [None, None, None, None]  # Index, Middle, Ring, Pinky
@@ -238,6 +101,8 @@ osc_disp.map("/resetParameters", handle_reset_parameters)
 server = osc_server.ThreadingOSCUDPServer(("127.0.0.1", 9002), osc_disp)
 print(" Python OSC Server listening on port 9002")
 print(f"[INFO] Python executable: {sys.executable}", flush=True)
+print(f"[INFO] OpenCV module: {getattr(cv2, '__file__', 'unknown')}", flush=True)
+print(f"[INFO] OpenCV version: {getattr(cv2, '__version__', 'unknown')}", flush=True)
 print(f"[INFO] MediaPipe version: {mp.__version__}", flush=True)
 print(f"[INFO] Protobuf version: {protobuf_version}", flush=True)
 
@@ -263,6 +128,16 @@ except Exception as exc:
 mp_draw = mp.solutions.drawing_utils
 
 # === CAMERA ===
+if not hasattr(cv2, "VideoCapture"):
+    print(
+        "[ERROR] OpenCV is installed incorrectly in the selected Python environment. "
+        "The cv2 module loaded, but VideoCapture is missing. Reinstall the pinned "
+        "OpenCV package in handtracker-env.",
+        flush=True,
+    )
+    server.shutdown()
+    raise SystemExit(1)
+
 if platform.system() == "Darwin":
     cap = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
 else:
@@ -313,8 +188,16 @@ def trigger_drum_finger(finger_index):
     if sample_index is not None:
         client.send_message("/triggerDrum", sample_index)
 
+def send_hand_state(hand_index, points):
+    payload = [hand_index, 1 if points is not None else 0]
 
-processing_proc = launch_processing_sketch()
+    if points is None:
+        payload.extend([0.0] * 42)
+    else:
+        for x, y in points:
+            payload.extend([float(x), float(y)])
+
+    client.send_message("/handState", payload)
 
 # === MAIN LOOP ===
 while cap.isOpened():
@@ -325,6 +208,7 @@ while cap.isOpened():
     frame = cv2.flip(frame, 1)
     img = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     results = hands.process(img)
+    hand_points = {0: None, 1: None}
 
     if results.multi_hand_landmarks and results.multi_handedness:
 
@@ -334,10 +218,7 @@ while cap.isOpened():
             label = hand_handedness.classification[0].label  # "Left" or "Right"
             landmarks = hand_landmarks.landmark
             hand_index = 0 if label == "Left" else 1
-
-            # Send hand points to Processing
-            for i, lm in enumerate(landmarks):
-                processing_client.send_message(f"/hand/{hand_index}/{i}", [lm.x, lm.y])
+            hand_points[hand_index] = [(lm.x, lm.y) for lm in landmarks]
 
             mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
 
@@ -435,21 +316,12 @@ while cap.isOpened():
                         current_values["lfoRate"]
                     ])
 
-                    processing_client.send_message("/handGrain", [
-                    current_values["GrainDur"],
-                    current_values["GrainPos"],
-                    current_values["GrainCutOff"],
-                    current_values["GrainDensity"],
-                    current_values["GrainPitch"],
-                    current_values["GrainReverse"],
-                    current_values["lfoRate"],
-                ])
-
         # Unfreeze if hand is open again
         if active_page == "synth" and not left_is_fist:
             freeze_parameters = False
 
-        
+    send_hand_state(0, hand_points[0])
+    send_hand_state(1, hand_points[1])
 
 # Show window
 # cv2.imshow("Hand Tracker", frame)
@@ -457,9 +329,6 @@ while cap.isOpened():
 #     break
 # if cv2.getWindowProperty("Hand Tracker", cv2.WND_PROP_VISIBLE) < 1:
 #     break
-
-if processing_proc is not None:
-    processing_proc.terminate()
 
 cap.release()
 
