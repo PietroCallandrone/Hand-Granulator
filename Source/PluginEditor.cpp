@@ -2,6 +2,9 @@
 #include "PluginEditor.h"
 #include <JuceHeader.h>
 
+#if JUCE_MAC
+ #include <dlfcn.h>
+#endif
 
 bool isPythonOn = false;//Boolean used to handle assertions
 
@@ -15,28 +18,91 @@ static const std::map<juce::String, juce::String> parameterToGlowImage = {
     { "GrainCutOff", "glow_grainCutOff.png" }
 };
 
-//Resolves and returns the full path to a projection image file located in the "Assets" folder of the project directory
-static juce::File getGlowFile(const juce::String& fileName)
+static juce::File getMacModuleBundleBuildDirectory()
 {
-    juce::File exeFolder = juce::File::getSpecialLocation(juce::File::currentExecutableFile)
-        .getParentDirectory();
-
 #if JUCE_MAC
-    exeFolder = exeFolder.getParentDirectory()   // Contents
-        .getParentDirectory()   // <Plugin>.vst3
-        .getParentDirectory();  // build folder
+    Dl_info info {};
+
+    if (dladdr((const void*) &getMacModuleBundleBuildDirectory, &info) != 0
+        && info.dli_fname != nullptr)
+    {
+        juce::File moduleFile { juce::String::fromUTF8(info.dli_fname) };
+
+        if (moduleFile.existsAsFile())
+            return moduleFile.getParentDirectory()   // MacOS
+                             .getParentDirectory()   // Contents
+                             .getParentDirectory();  // Bundle root
+    }
 #endif
 
-    auto dir = exeFolder;
+    return {};
+}
+
+static juce::File findProjectRoot()
+{
+    auto dir = getMacModuleBundleBuildDirectory();
+
+    if (! dir.isDirectory())
+        dir = juce::File::getSpecialLocation(juce::File::currentExecutableFile)
+                  .getParentDirectory();
+
+    auto fallback = juce::File::getCurrentWorkingDirectory();
+
     while (dir.exists())
     {
         if (dir.getChildFile("CMProject.jucer").existsAsFile())
-            break;
+            return dir;
 
         dir = dir.getParentDirectory();
     }
 
-    return dir.getChildFile("Assets").getChildFile(fileName);
+    while (fallback.exists())
+    {
+        if (fallback.getChildFile("CMProject.jucer").existsAsFile())
+            return fallback;
+
+        fallback = fallback.getParentDirectory();
+    }
+
+    return {};
+}
+
+static juce::File getHandTrackerPythonExecutable()
+{
+    auto overridePath = juce::SystemStats::getEnvironmentVariable("HANDTRACKER_PYTHON", {});
+
+    if (overridePath.isNotEmpty())
+    {
+        juce::File overridePython { overridePath };
+
+        if (overridePython.existsAsFile())
+            return overridePython;
+    }
+
+    auto home = juce::File::getSpecialLocation(juce::File::userHomeDirectory);
+    juce::StringArray candidates;
+
+    candidates.add(home.getChildFile("opt").getChildFile("miniconda3").getChildFile("envs").getChildFile("handtracker-env").getChildFile("bin").getChildFile("python3").getFullPathName());
+    candidates.add(home.getChildFile("opt").getChildFile("miniconda3").getChildFile("envs").getChildFile("handtracker-env").getChildFile("bin").getChildFile("python").getFullPathName());
+    candidates.add(home.getChildFile("anaconda3").getChildFile("envs").getChildFile("handtracker-env").getChildFile("bin").getChildFile("python3").getFullPathName());
+    candidates.add(home.getChildFile("anaconda3").getChildFile("envs").getChildFile("handtracker-env").getChildFile("bin").getChildFile("python").getFullPathName());
+
+    for (const auto& candidate : candidates)
+    {
+        juce::File pythonExe { candidate };
+
+        if (pythonExe.existsAsFile())
+            return pythonExe;
+    }
+
+    return {};
+}
+
+//Resolves and returns the full path to a projection image file located in the "Assets" folder of the project directory
+static juce::File getGlowFile(const juce::String& fileName)
+{
+    auto projectRoot = findProjectRoot();
+    return projectRoot.getChildFile("Assets").getChildFile(fileName);
 }
 
 //Loads, transforms (scale + rotate), and displays the appropriate projection image for a finger-assigned parameter.
@@ -99,26 +165,8 @@ void CMProjectAudioProcessorEditor::assignGlowToFinger(const juce::String& param
 //Static function used to find the agnostic correct path
 static juce::File getHandTrackerScript()
 {
-    juce::File exeFolder = juce::File::getSpecialLocation(
-        juce::File::currentExecutableFile)
-        .getParentDirectory();
-
-#if JUCE_MAC
-    
-    exeFolder = exeFolder.getParentDirectory() //Contents
-        .getParentDirectory()  //<Name>.vst3
-        .getParentDirectory(); //build folder
-#endif
-
-    auto dir = exeFolder; //Walk up the tree until repo found
-    while (dir.exists())
-    {
-        if (dir.getChildFile("CMProject.jucer").existsAsFile()) //Once found CMproject.jucer, search the python script
-            break;
-        dir = dir.getParentDirectory();
-    }
-    //append the relative bits
-    return dir.getChildFile("python")
+    auto projectRoot = findProjectRoot();
+    return projectRoot.getChildFile("python")
         .getChildFile("HandTracker")
         .getChildFile("main.py");
 }
@@ -126,24 +174,8 @@ static juce::File getHandTrackerScript()
 //For the hand neon-green image
 static juce::File getHandImageFile()
 {
-    juce::File exeFolder = juce::File::getSpecialLocation(
-        juce::File::currentExecutableFile)
-        .getParentDirectory();
-
-#if JUCE_MAC
-    exeFolder = exeFolder.getParentDirectory()
-        .getParentDirectory()
-        .getParentDirectory();
-#endif
-
-    auto dir = exeFolder;
-    while (dir.exists())
-    {
-        if (dir.getChildFile("CMProject.jucer").existsAsFile()) //Same logic used for the python script
-            break;
-        dir = dir.getParentDirectory();
-    }
-    return dir.getChildFile("Assets").getChildFile("handimage.png"); //Append the image of hands
+    auto projectRoot = findProjectRoot();
+    return projectRoot.getChildFile("Assets").getChildFile("handimage.png"); //Append the image of hands
 }
 
 //borders of the plugin that light up periodically
@@ -999,11 +1031,18 @@ void CMProjectAudioProcessorEditor::buttonClicked(juce::Button* button)
 
     if (button == &synthPage->startCamera)
     {
-        launchPythonHandTracker();
-        synthPage->startCamera.setEnabled(false);
-        synthPage->stopCamera.setEnabled(true);
-        statusDisplay.showMessage("Camera Started");
-        isPythonOn = true;
+        if (launchPythonHandTracker())
+        {
+            synthPage->startCamera.setEnabled(false);
+            synthPage->stopCamera.setEnabled(true);
+            statusDisplay.showMessage("Camera Started");
+        }
+        else
+        {
+            synthPage->startCamera.setEnabled(true);
+            synthPage->stopCamera.setEnabled(false);
+        }
+
         return;
     }
 
@@ -1174,16 +1213,18 @@ void CMProjectAudioProcessorEditor::buttonClicked(juce::Button* button)
 //==============================================================================
 
 //This function starts the python process
-void CMProjectAudioProcessorEditor::launchPythonHandTracker()
+bool CMProjectAudioProcessorEditor::launchPythonHandTracker()
 {
     if (cameraRunning)
-        return;
+        return true;
 
     const juce::File script = getHandTrackerScript(); //Find the python script 
 
     if (! script.existsAsFile())
     {
-        return;
+        DBG("❌ Hand tracker script not found: " << script.getFullPathName());
+        statusDisplay.showMessage("Hand tracker script not found");
+        return false;
     }
 
 #if JUCE_WINDOWS
@@ -1196,74 +1237,95 @@ void CMProjectAudioProcessorEditor::launchPythonHandTracker()
                                 .getFullPathName();
     if (!juce::File(pythonExe).existsAsFile())
     {
-        return;
+        statusDisplay.showMessage("Python env not found");
+        return false;
     }
     if (pythonProcess.isRunning())
-        return;
+        return true;
 
-    juce::StringArray cmd{ pythonExe, script.getFullPathName() };
+    juce::StringArray cmd{ pythonExe, "-u", script.getFullPathName() };
  
     if (!pythonProcess.start(cmd))
     {
         DBG("❌ Failed to launch Python tracker");
-        
+        statusDisplay.showMessage("Could not launch tracker");
+        return false;
     }
-    else
+
+    juce::Thread::sleep(750);
+
+    if (! pythonProcess.isRunning())
     {
-        cameraRunning = true;
-        juce::Thread::sleep(500); //wait 0.5 seconds
-        
-        if (!audioProcessor.senderToPython.connect("127.0.0.1", 9002))
-        {
-            DBG("❌ Could not connect to Python OSC server on port 9002");
-        }
-        else
-        {
-            isPythonOn = true; //Change the boolean 
-            audioProcessor.senderToPython.send("/activePage", currentPage); //inform the python of the current position in the plugin
-        }       
+        auto output = pythonProcess.readAllProcessOutput().trim();
+        DBG("❌ Python tracker exited early. Output: " << output);
+        statusDisplay.showMessage(output.isNotEmpty() ? output : "Camera failed to start");
+        return false;
     }
 
 #else
-    // macOS: invoke a login zsh so that `conda activate` is available
-    juce::String quotedScriptPath = script.getFullPathName().quoted();
-    juce::String zshCommand =
-        "conda activate handtracker-env && "
-        "python3 " + quotedScriptPath;
+    auto pythonExe = getHandTrackerPythonExecutable();
 
-    juce::StringArray cmd { "/bin/zsh", "-ic", zshCommand };
+    if (! pythonExe.existsAsFile())
+    {
+        statusDisplay.showMessage("Python not found");
+        DBG("❌ Could not resolve a Python executable for the hand tracker");
+        return false;
+    }
+
+    juce::StringArray cmd { pythonExe.getFullPathName(), "-u", script.getFullPathName() };
     
     if (pythonProcess.isRunning())
-        return;
+        return true;
         
-        DBG("Launching: " << cmd.joinIntoString(" "));
-        if (! pythonProcess.start(cmd))
+    DBG("Launching: " << cmd.joinIntoString(" "));
+
+    if (! pythonProcess.start(cmd))
+    {
+        DBG("❌ Couldn’t launch Python hand-tracker");
+        statusDisplay.showMessage("Could not launch tracker");
+        return false;
+    }
+
+    juce::Thread::sleep(750); // allow immediate startup failures to surface
+
+    if (! pythonProcess.isRunning())
+    {
+        auto output = pythonProcess.readAllProcessOutput().trim();
+        DBG("❌ Python tracker exited early. Output: " << output);
+        statusDisplay.showMessage(output.isNotEmpty() ? output : "Camera failed to start");
+        return false;
+    }
+#endif
+
+    for (int attempt = 0; attempt < 20; ++attempt)
+    {
+        if (audioProcessor.senderToPython.connect("127.0.0.1", 9002))
         {
-            DBG(" couldn’t launch Python hand-tracker");
-            return;
-        }
-        else
-        {
-            DBG("Python process started");
             cameraRunning = true;
             isPythonOn = true;
-            juce::Thread::sleep(500); // wait 0.5 seconds
-            
-            if (!audioProcessor.senderToPython.connect("127.0.0.1", 9002))
-            {
-                DBG("❌ Could not connect to Python OSC server on port 9002");
-            }
-            else
-            {
-                DBG("✅ Connected to Python OSC server on port 9002");
-                audioProcessor.senderToPython.send("/activePage", currentPage);
-
-            }
-           
-            
+            audioProcessor.senderToPython.send("/activePage", currentPage);
+            return true;
         }
-#endif
-    
+
+        if (! pythonProcess.isRunning())
+            break;
+
+        juce::Thread::sleep(100);
+    }
+
+    auto output = pythonProcess.readAllProcessOutput().trim();
+    DBG("❌ Could not connect to Python OSC server on port 9002. Output: " << output);
+
+    if (pythonProcess.isRunning())
+    {
+        pythonProcess.kill();
+        pythonProcess.waitForProcessToFinish(2000);
+    }
+
+    cameraRunning = false;
+    isPythonOn = false;
+    statusDisplay.showMessage(output.isNotEmpty() ? output : "Tracker did not start");
+    return false;
 }
 
 //This function stops the python process
@@ -1278,6 +1340,7 @@ void CMProjectAudioProcessorEditor::stopPythonHandTracker()
         pythonProcess.waitForProcessToFinish(2000);
     }
     cameraRunning = false;
+    isPythonOn = false;
 }
 
 //This function controls if the camera has been closed from the X
@@ -1306,8 +1369,17 @@ void CMProjectAudioProcessorEditor::timerCallback()
         synthPage->startCamera.setEnabled(true);
         synthPage->stopCamera.setEnabled(false);
         isPythonOn = false;
+
+        auto output = pythonProcess.readAllProcessOutput().trim();
+
+        if (output.isNotEmpty())
+        {
+            DBG("❌ Python tracker stopped. Output: " << output);
+            statusDisplay.showMessage(output);
+        }
+        else
+        {
+            statusDisplay.showMessage("Camera stopped");
+        }
     }
 }
-
-
-

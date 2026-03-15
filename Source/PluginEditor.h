@@ -140,7 +140,7 @@ private:
     void buttonClicked(juce::Button* button) override;
     juce::Image currentParameterIcon;
     //python
-    void launchPythonHandTracker();
+    bool launchPythonHandTracker();
     void stopPythonHandTracker();
     void timerCallback() override;
     juce::ChildProcess pythonProcess;

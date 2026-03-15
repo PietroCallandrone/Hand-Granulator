@@ -8,6 +8,9 @@ import subprocess
 import os
 import platform
 import shutil
+import sys
+
+from google.protobuf import __version__ as protobuf_version
 
 from pathlib import Path
 
@@ -234,6 +237,9 @@ osc_disp.map("/resetParameters", handle_reset_parameters)
 
 server = osc_server.ThreadingOSCUDPServer(("127.0.0.1", 9002), osc_disp)
 print(" Python OSC Server listening on port 9002")
+print(f"[INFO] Python executable: {sys.executable}", flush=True)
+print(f"[INFO] MediaPipe version: {mp.__version__}", flush=True)
+print(f"[INFO] Protobuf version: {protobuf_version}", flush=True)
 
 osc_thread = threading.Thread(target=server.serve_forever)
 osc_thread.daemon = True
@@ -241,11 +247,38 @@ osc_thread.start()
 
 # === MEDIAPIPE SETUP ===
 mp_hands = mp.solutions.hands
-hands = mp_hands.Hands(max_num_hands=2, min_detection_confidence=0.7)
+
+try:
+    hands = mp_hands.Hands(max_num_hands=2, min_detection_confidence=0.7)
+except Exception as exc:
+    print(
+        "[ERROR] Failed to initialize MediaPipe Hands. "
+        "If you are using mediapipe 0.10.21, make sure protobuf is >= 4.25.3 and < 5.",
+        flush=True,
+    )
+    print(f"[ERROR] MediaPipe init exception: {exc}", flush=True)
+    server.shutdown()
+    raise
+
 mp_draw = mp.solutions.drawing_utils
 
 # === CAMERA ===
-cap = cv2.VideoCapture(0)
+if platform.system() == "Darwin":
+    cap = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
+else:
+    cap = cv2.VideoCapture(0)
+
+if not cap.isOpened():
+    print(
+        "[ERROR] Could not open camera 0. Check that macOS camera permission is granted "
+        "to the host app that launched this script and that no other app is already using "
+        f"the camera. Interpreter: {sys.executable}",
+        flush=True,
+    )
+    server.shutdown()
+    raise SystemExit(1)
+
+print("[INFO] Camera opened", flush=True)
 
 # === LOGIC FUNCTIONS ===
 def posmap(x, in_min, in_max, out_min=0.0, out_max=sample_duration, power=2.5):
