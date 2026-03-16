@@ -82,10 +82,17 @@ static juce::File getHandTrackerPythonExecutable()
     auto home = juce::File::getSpecialLocation(juce::File::userHomeDirectory);
     juce::StringArray candidates;
 
+#if JUCE_WINDOWS
+    candidates.add(home.getChildFile("miniconda3").getChildFile("envs").getChildFile("handtracker-env").getChildFile("python.exe").getFullPathName());
+    candidates.add(home.getChildFile("Miniconda3").getChildFile("envs").getChildFile("handtracker-env").getChildFile("python.exe").getFullPathName());
+    candidates.add(home.getChildFile("anaconda3").getChildFile("envs").getChildFile("handtracker-env").getChildFile("python.exe").getFullPathName());
+    candidates.add(home.getChildFile("Anaconda3").getChildFile("envs").getChildFile("handtracker-env").getChildFile("python.exe").getFullPathName());
+#else
     candidates.add(home.getChildFile("opt").getChildFile("miniconda3").getChildFile("envs").getChildFile("handtracker-env").getChildFile("bin").getChildFile("python3").getFullPathName());
     candidates.add(home.getChildFile("opt").getChildFile("miniconda3").getChildFile("envs").getChildFile("handtracker-env").getChildFile("bin").getChildFile("python").getFullPathName());
     candidates.add(home.getChildFile("anaconda3").getChildFile("envs").getChildFile("handtracker-env").getChildFile("bin").getChildFile("python3").getFullPathName());
     candidates.add(home.getChildFile("anaconda3").getChildFile("envs").getChildFile("handtracker-env").getChildFile("bin").getChildFile("python").getFullPathName());
+#endif
 
     for (const auto& candidate : candidates)
     {
@@ -1510,14 +1517,8 @@ bool CMProjectAudioProcessorEditor::launchPythonHandTracker()
     }
 
 #if JUCE_WINDOWS
-    //Point directly at the python.exe in your conda env
-    auto home = juce::File::getSpecialLocation(juce::File::userHomeDirectory);
-    juce::String pythonExe = home.getChildFile("anaconda3")
-                                .getChildFile("envs")
-                                .getChildFile("handtracker-env")
-                                .getChildFile("python.exe")
-                                .getFullPathName();
-    if (!juce::File(pythonExe).existsAsFile())
+    auto pythonExe = getHandTrackerPythonExecutable();
+    if (! pythonExe.existsAsFile())
     {
         statusDisplay.showMessage("Python env not found");
         return false;
@@ -1525,7 +1526,7 @@ bool CMProjectAudioProcessorEditor::launchPythonHandTracker()
     if (pythonProcess.isRunning())
         return true;
 
-    juce::StringArray cmd{ pythonExe, "-u", script.getFullPathName() };
+    juce::StringArray cmd{ pythonExe.getFullPathName(), "-u", script.getFullPathName() };
  
     if (!pythonProcess.start(cmd))
     {
