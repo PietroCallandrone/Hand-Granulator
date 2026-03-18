@@ -868,6 +868,10 @@ class HDImageButton : public juce::ImageButton
 {
 public:
     using juce::ImageButton::ImageButton;
+    std::function<void(HDImageButton&, const juce::MouseEvent&)> onMouseDownCallback;
+    std::function<void(HDImageButton&, const juce::MouseEvent&)> onMouseDragCallback;
+    std::function<void(HDImageButton&, const juce::MouseEvent&)> onMouseUpCallback;
+
     void paintButton(juce::Graphics& g, bool isMouseOver, bool isButtonDown) override
     {
         g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);
@@ -878,6 +882,30 @@ public:
             bounds.getWidth(), bounds.getHeight(),
             juce::RectanglePlacement::centred,
             false);
+    }
+
+    void mouseDown(const juce::MouseEvent& event) override
+    {
+        juce::ImageButton::mouseDown(event);
+
+        if (onMouseDownCallback)
+            onMouseDownCallback(*this, event);
+    }
+
+    void mouseDrag(const juce::MouseEvent& event) override
+    {
+        juce::ImageButton::mouseDrag(event);
+
+        if (onMouseDragCallback)
+            onMouseDragCallback(*this, event);
+    }
+
+    void mouseUp(const juce::MouseEvent& event) override
+    {
+        juce::ImageButton::mouseUp(event);
+
+        if (onMouseUpCallback)
+            onMouseUpCallback(*this, event);
     }
 };
 
@@ -1507,9 +1535,113 @@ void CMProjectAudioProcessorEditor::addListenerToGLobal() {
     synthPage->grainPitch.addListener(this);
     synthPage->grainCutOff.addListener(this);
 
+    auto attachParameterDrag = [this](HDImageButton& button, const juce::String& parameter)
+    {
+        button.onMouseDownCallback = [this, parameter](HDImageButton& source, const juce::MouseEvent& event)
+        {
+            draggedParameter = parameter;
+            draggedParameterIcon = source.getNormalImage();
+            dragStartPoint = event.getScreenPosition().toFloat();
+            dragCurrentPoint = dragStartPoint;
+            hoveredFingerButton = nullptr;
+        };
+
+        button.onMouseDragCallback = [this, parameter](HDImageButton& source, const juce::MouseEvent& event)
+        {
+            const auto screenPoint = event.getScreenPosition().toFloat();
+
+            if (! isParameterDragActive)
+            {
+                if (screenPoint.getDistanceFrom(dragStartPoint) < 10.0f)
+                    return;
+
+                if (! isPythonOn)
+                {
+                    statusDisplay.showMessage("Open Camera first");
+                    return;
+                }
+
+                beginParameterDrag(parameter,
+                                   source.getNormalImage(),
+                                   screenPoint,
+                                   source.localPointToGlobal(source.getLocalBounds().getCentre()).toFloat());
+                return;
+            }
+
+            updateParameterDrag(screenPoint);
+        };
+
+        button.onMouseUpCallback = [this](HDImageButton&, const juce::MouseEvent& event)
+        {
+            if (isParameterDragActive)
+                finishParameterDrag(event.getScreenPosition().toFloat());
+        };
+    };
+
+    attachParameterDrag(synthPage->grainPos, "GrainPos");
+    attachParameterDrag(synthPage->grainDur, "GrainDur");
+    attachParameterDrag(synthPage->grainDensity, "GrainDensity");
+    attachParameterDrag(synthPage->grainPitch, "GrainPitch");
+    attachParameterDrag(synthPage->grainCutOff, "GrainCutOff");
+
 
 }
 void CMProjectAudioProcessorEditor::paint(juce::Graphics&) {}
+void CMProjectAudioProcessorEditor::paintOverChildren(juce::Graphics& g)
+{
+    if (! isParameterDragActive || draggedParameter.isEmpty())
+        return;
+
+    const auto start = getLocalPoint(nullptr, dragStartPoint.toInt()).toFloat();
+    const auto current = getLocalPoint(nullptr, dragCurrentPoint.toInt()).toFloat();
+    const auto accent = getParameterAccentColour(draggedParameter);
+    const float pulse = 0.65f + 0.35f * static_cast<float>(std::sin(juce::Time::getMillisecondCounterHiRes() * 0.012));
+
+    juce::Path dragPath;
+    dragPath.startNewSubPath(start);
+    dragPath.quadraticTo((start.x + current.x) * 0.5f, juce::jmin(start.y, current.y) - 32.0f, current.x, current.y);
+
+    g.setColour(accent.withAlpha(0.18f * pulse));
+    g.strokePath(dragPath, juce::PathStrokeType(10.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+    g.setColour(accent.withAlpha(0.95f));
+    g.strokePath(dragPath, juce::PathStrokeType(2.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+    if (hoveredFingerButton != nullptr)
+    {
+        auto hoverBounds = getLocalArea(hoveredFingerButton, hoveredFingerButton->getLocalBounds()).toFloat().expanded(10.0f);
+        g.setColour(accent.withAlpha(0.14f * pulse));
+        g.fillEllipse(hoverBounds);
+        g.setColour(juce::Colours::white.withAlpha(0.95f));
+        g.drawEllipse(hoverBounds, 2.2f);
+    }
+
+    auto chipBounds = juce::Rectangle<float>(0.0f, 0.0f, 128.0f, 40.0f).withCentre(current + juce::Point<float>(0.0f, -28.0f));
+    g.setColour(juce::Colours::black.withAlpha(0.40f));
+    g.fillRoundedRectangle(chipBounds.translated(0.0f, 3.0f), 18.0f);
+
+    g.setColour(accent.withAlpha(0.18f));
+    g.fillRoundedRectangle(chipBounds, 18.0f);
+    g.setColour(accent.withAlpha(0.82f));
+    g.drawRoundedRectangle(chipBounds, 18.0f, 1.2f);
+
+    if (draggedParameterIcon.isValid())
+    {
+        auto iconArea = chipBounds.removeFromLeft(34.0f).reduced(6.0f);
+        g.drawImageWithin(draggedParameterIcon,
+                          iconArea.getX(), iconArea.getY(),
+                          iconArea.getWidth(), iconArea.getHeight(),
+                          juce::RectanglePlacement::centred,
+                          false);
+    }
+
+    g.setColour(juce::Colours::white.withAlpha(0.94f));
+    g.setFont(juce::Font { juce::FontOptions(12.0f) }.boldened());
+    g.drawFittedText(draggedParameter,
+                     chipBounds.reduced(6.0f, 0.0f).toNearestInt(),
+                     juce::Justification::centred,
+                     1);
+}
 void CMProjectAudioProcessorEditor::resized()
 {
     if (background)
@@ -1528,31 +1660,32 @@ void CMProjectAudioProcessorEditor::resized()
     float scaleY = visualizerArea.getHeight() / 350.0f;
     float imageX = visualizerArea.getX() - (15.0f * scaleX);
     float imageY = visualizerArea.getY() + (15.0f * scaleY);
+    const int fingerButtonYOffset = juce::roundToInt(18.0f * scaleY);
     const auto circleDiameter = 20;
 
     //Values of the dot to perfectly sit on the index finger
     const int dotX = imageX + 560 - circleDiameter / 2;
-    const int dotY = imageY + 15 - circleDiameter / 2;
+    const int dotY = imageY + 15 + fingerButtonYOffset - circleDiameter / 2;
 
     indexButton.setBounds(dotX, dotY, circleDiameter, circleDiameter);
     //Values of the dot to perfectly sit on the middle finger
     const int midOffsetX = 511.8;
     const int midOffsetY = 3.9;
     const int midX = imageX + midOffsetX - circleDiameter / 2;
-    const int midY = imageY + midOffsetY - circleDiameter / 2;
+    const int midY = imageY + midOffsetY + fingerButtonYOffset - circleDiameter / 2;
     middleButton.setBounds(midX, midY, circleDiameter, circleDiameter);
     //Values of the dot to perfectly sit on the ring finger
     const int ringOffx = 468;
     const int ringOffy = 17;
     const int ringX = imageX + ringOffx - circleDiameter / 2;
-    const int ringY = imageY + ringOffy - circleDiameter / 2;
+    const int ringY = imageY + ringOffy + fingerButtonYOffset - circleDiameter / 2;
     ringButton.setBounds(ringX, ringY, circleDiameter, circleDiameter);
 
     //Values of the dot to perfectly sit on the pinky finger
     const int pinkyOffx = 438;
     const int pinkyOffy = 62;
     const int pinkyX = imageX + pinkyOffx - circleDiameter / 2;
-    const int pinkyY = imageY + pinkyOffy - circleDiameter / 2;
+    const int pinkyY = imageY + pinkyOffy + fingerButtonYOffset - circleDiameter / 2;
     pinkyButton.setBounds(pinkyX, pinkyY, circleDiameter, circleDiameter);
     
     statusDisplay.setBounds({});
@@ -1568,6 +1701,231 @@ void CMProjectAudioProcessorEditor::mouseWheelMove(const juce::MouseEvent& e,
     const juce::MouseWheelDetails& wheel)
 {
     Component::mouseWheelMove(e, wheel);
+}
+
+int CMProjectAudioProcessorEditor::getFingerIndex(const CircleButton& fingerButton) const noexcept
+{
+    if (&fingerButton == &indexButton)  return 0;
+    if (&fingerButton == &middleButton) return 1;
+    if (&fingerButton == &ringButton)   return 2;
+    if (&fingerButton == &pinkyButton)  return 3;
+    return -1;
+}
+
+juce::String CMProjectAudioProcessorEditor::getFingerName(const CircleButton& fingerButton) const
+{
+    if (&fingerButton == &indexButton)  return "Index";
+    if (&fingerButton == &middleButton) return "Middle";
+    if (&fingerButton == &ringButton)   return "Ring";
+    if (&fingerButton == &pinkyButton)  return "Pinky";
+    return "Finger";
+}
+
+juce::Colour CMProjectAudioProcessorEditor::getParameterAccentColour(const juce::String& parameter) const
+{
+    if (parameter == "GrainPos")     return juce::Colour::fromRGB(84, 240, 255);
+    if (parameter == "GrainDur")     return juce::Colour::fromRGB(255, 192, 92);
+    if (parameter == "GrainDensity") return juce::Colour::fromRGB(108, 255, 140);
+    if (parameter == "GrainPitch")   return juce::Colour::fromRGB(255, 122, 214);
+    if (parameter == "GrainCutOff")  return juce::Colour::fromRGB(120, 168, 255);
+    if (parameter == "GrainReverse") return juce::Colour::fromRGB(244, 250, 255);
+    return juce::Colours::limegreen;
+}
+
+bool CMProjectAudioProcessorEditor::hasVisibleTrackedHands() const
+{
+    const auto trackedHands = audioProcessor.getTrackedHands();
+
+    for (const auto& hand : trackedHands)
+        if (hand.visible)
+            return true;
+
+    return false;
+}
+
+void CMProjectAudioProcessorEditor::updateFingerTargetVisibility()
+{
+    const bool handsVisible = hasVisibleTrackedHands();
+
+    auto updateButton = [this, handsVisible](CircleButton& button)
+    {
+        const bool shouldShow = ! handsVisible && (isParameterDragActive || button.hasAssignedIcon());
+        button.setPreviewActive(shouldShow);
+        button.setVisible(shouldShow);
+
+        if (! shouldShow)
+            button.setDragHover(false);
+    };
+
+    updateButton(indexButton);
+    updateButton(middleButton);
+    updateButton(ringButton);
+    updateButton(pinkyButton);
+}
+
+CMProjectAudioProcessorEditor::CircleButton* CMProjectAudioProcessorEditor::getFingerButtonAtScreenPosition(juce::Point<float> screenPosition)
+{
+    auto findTarget = [screenPosition](CircleButton& button) -> CMProjectAudioProcessorEditor::CircleButton*
+    {
+        if (! button.isVisible())
+            return nullptr;
+
+        const auto bounds = button.getScreenBounds().expanded(16);
+        return bounds.contains(screenPosition.toInt()) ? &button : nullptr;
+    };
+
+    if (auto* button = findTarget(indexButton))  return button;
+    if (auto* button = findTarget(middleButton)) return button;
+    if (auto* button = findTarget(ringButton))   return button;
+    if (auto* button = findTarget(pinkyButton))  return button;
+    return nullptr;
+}
+
+void CMProjectAudioProcessorEditor::updateFingerDragHover(juce::Point<float> screenPosition)
+{
+    hoveredFingerButton = getFingerButtonAtScreenPosition(screenPosition);
+
+    indexButton.setDragHover(hoveredFingerButton == &indexButton);
+    middleButton.setDragHover(hoveredFingerButton == &middleButton);
+    ringButton.setDragHover(hoveredFingerButton == &ringButton);
+    pinkyButton.setDragHover(hoveredFingerButton == &pinkyButton);
+}
+
+void CMProjectAudioProcessorEditor::beginParameterDrag(const juce::String& parameter,
+                                                       const juce::Image& icon,
+                                                       juce::Point<float> screenPosition,
+                                                       juce::Point<float> dragOrigin)
+{
+    setCurrentParameter(parameter);
+    currentParameterIcon = icon;
+    draggedParameter = parameter;
+    draggedParameterIcon = icon;
+    dragStartPoint = dragOrigin;
+    dragCurrentPoint = screenPosition;
+    isParameterDragActive = true;
+    updateFingerTargetVisibility();
+    updateFingerDragHover(screenPosition);
+    repaint();
+}
+
+void CMProjectAudioProcessorEditor::updateParameterDrag(juce::Point<float> screenPosition)
+{
+    if (! isParameterDragActive)
+        return;
+
+    dragCurrentPoint = screenPosition;
+    updateFingerDragHover(screenPosition);
+    repaint();
+}
+
+void CMProjectAudioProcessorEditor::clearFingerAssignmentVisuals(int fingerIndex)
+{
+    auto clearGlow = [](juce::ImageComponent& glow)
+    {
+        glow.setVisible(false);
+        glow.setImage(juce::Image(), juce::RectanglePlacement::centred);
+    };
+
+    switch (fingerIndex)
+    {
+        case 0:
+            indexButton.clearIcon();
+            indexButton.setTooltip({});
+            clearGlow(indexGlow);
+            break;
+        case 1:
+            middleButton.clearIcon();
+            middleButton.setTooltip({});
+            clearGlow(middleGlow);
+            break;
+        case 2:
+            ringButton.clearIcon();
+            ringButton.setTooltip({});
+            clearGlow(ringGlow);
+            break;
+        case 3:
+            pinkyButton.clearIcon();
+            pinkyButton.setTooltip({});
+            clearGlow(pinkyGlow);
+            break;
+        default:
+            break;
+    }
+}
+
+bool CMProjectAudioProcessorEditor::assignParameterToFinger(const juce::String& parameter,
+                                                            const juce::Image& icon,
+                                                            CircleButton& fingerButton)
+{
+    if (! isPythonOn)
+    {
+        statusDisplay.showMessage("Open Camera first");
+        return false;
+    }
+
+    if (parameter.isEmpty())
+    {
+        statusDisplay.showMessage("Select a parameter");
+        return false;
+    }
+
+    const auto fingerIndex = getFingerIndex(fingerButton);
+
+    if (fingerIndex < 0)
+        return false;
+
+    for (int i = 0; i < 4; ++i)
+    {
+        if (i != fingerIndex && audioProcessor.fingerControls[i] == parameter)
+        {
+            audioProcessor.fingerControls[i].clear();
+            clearFingerAssignmentVisuals(i);
+        }
+    }
+
+    audioProcessor.senderToPython.send("/activePage", currentPage);
+    audioProcessor.fingerControls[fingerIndex] = parameter;
+    audioProcessor.sendFingerAssignementsOSC();
+
+    setCurrentParameter(parameter);
+    currentParameterIcon = icon;
+
+    fingerButton.setIconImage(icon);
+    fingerButton.setTooltip(parameter);
+
+    auto clearGlow = [](juce::ImageComponent& glow)
+    {
+        glow.setVisible(false);
+        glow.setImage(juce::Image(), juce::RectanglePlacement::centred);
+    };
+
+    clearGlow(indexGlow);
+    clearGlow(middleGlow);
+    clearGlow(ringGlow);
+    clearGlow(pinkyGlow);
+
+    updateFingerTargetVisibility();
+    statusDisplay.showMessage(getFingerName(fingerButton) + "->" + parameter);
+    return true;
+}
+
+void CMProjectAudioProcessorEditor::finishParameterDrag(juce::Point<float> screenPosition)
+{
+    if (! isParameterDragActive)
+        return;
+
+    updateParameterDrag(screenPosition);
+
+    if (auto* fingerButton = getFingerButtonAtScreenPosition(screenPosition))
+        assignParameterToFinger(draggedParameter, draggedParameterIcon, *fingerButton);
+
+    isParameterDragActive = false;
+    draggedParameter.clear();
+    draggedParameterIcon = juce::Image();
+    hoveredFingerButton = nullptr;
+    updateFingerDragHover(screenPosition);
+    updateFingerTargetVisibility();
+    repaint();
 }
 
 
@@ -1629,19 +1987,19 @@ void CMProjectAudioProcessorEditor::buttonClicked(juce::Button* button)
     {
         setCurrentParameter("GrainPos");
         currentParameterIcon = synthPage->grainPos.getNormalImage();
-        statusDisplay.showMessage("grainPosition selected");
+        statusDisplay.showMessage("GrainPos selected");
     }
     else if (button == &synthPage->grainDur)
     {
         setCurrentParameter("GrainDur");
         currentParameterIcon = synthPage->grainDur.getNormalImage();
-        statusDisplay.showMessage("grainDuration selected");
+        statusDisplay.showMessage("GrainDur selected");
     }
     else if (button == &synthPage->grainDensity)
     {
         setCurrentParameter("GrainDensity");
         currentParameterIcon = synthPage->grainDensity.getNormalImage();
-        statusDisplay.showMessage("grainDensity selected");
+        statusDisplay.showMessage("GrainDensity selected");
     }
     else if (button == &synthPage->grainPitch)
     {
@@ -1653,74 +2011,24 @@ void CMProjectAudioProcessorEditor::buttonClicked(juce::Button* button)
     {
         setCurrentParameter("GrainCutOff");
         currentParameterIcon = synthPage->grainCutOff.getNormalImage();
-        statusDisplay.showMessage("CutOff selected");
-    }
-    auto isAlreadyAssigned = [&](const juce::String& param) -> bool
-    {
-        for (int i = 0; i < 4; ++i)
-            if (audioProcessor.fingerControls[i] == param)
-                return true;
-        return false;
-    };
-
-    auto ensureUniqueAssignment = [this](int fingerIndex)
-    {
-        for (int i = 0; i < 4; ++i)
-            if (i != fingerIndex && audioProcessor.fingerControls[i] == currentParameter)
-                audioProcessor.fingerControls[i] = "";
-
-        audioProcessor.senderToPython.send("/activePage", currentPage);
-        audioProcessor.fingerControls[fingerIndex] = currentParameter;
-        audioProcessor.sendFingerAssignementsOSC();
+        statusDisplay.showMessage("GrainCutOff selected");
     };
 
     if (button == &indexButton)
     {
-        if (!isPythonOn) { statusDisplay.showMessage("Open Camera first"); return; }
-        if (currentParameter.isEmpty()) { statusDisplay.showMessage("Select a parameter"); return; }
-        if (isAlreadyAssigned(currentParameter)) { statusDisplay.showMessage(currentParameter + " is already mapped!"); return; }
-
-        ensureUniqueAssignment(0);
-        indexButton.setIconImage(currentParameterIcon);
-        indexButton.setTooltip(currentParameter);
-        statusDisplay.showMessage("Index->" + currentParameter);
-        assignGlowToFinger(currentParameter, indexGlow, { 591, 330 }, 20.0f, 73, 73);
+        assignParameterToFinger(currentParameter, currentParameterIcon, indexButton);
     }
     else if (button == &middleButton)
     {
-        if (!isPythonOn) { statusDisplay.showMessage("Open Camera first"); return; }
-        if (currentParameter.isEmpty()) { statusDisplay.showMessage("Select a parameter"); return; }
-        if (isAlreadyAssigned(currentParameter)) { statusDisplay.showMessage(currentParameter + " is already mapped!"); return; }
-
-        ensureUniqueAssignment(1);
-        middleButton.setIconImage(currentParameterIcon);
-        middleButton.setTooltip(currentParameter);
-        statusDisplay.showMessage("Middle->" + currentParameter);
-        assignGlowToFinger(currentParameter, middleGlow, { 532, 316 }, 6.0f, 72, 72);
+        assignParameterToFinger(currentParameter, currentParameterIcon, middleButton);
     }
     else if (button == &ringButton)
     {
-        if (!isPythonOn) { statusDisplay.showMessage("Open Camera first"); return; }
-        if (currentParameter.isEmpty()) { statusDisplay.showMessage("Select a parameter"); return; }
-        if (isAlreadyAssigned(currentParameter)) { statusDisplay.showMessage(currentParameter + " is already mapped!"); return; }
-
-        ensureUniqueAssignment(2);
-        ringButton.setIconImage(currentParameterIcon);
-        ringButton.setTooltip(currentParameter);
-        statusDisplay.showMessage("Ring->" + currentParameter);
-        assignGlowToFinger(currentParameter, ringGlow, { 474, 331 }, -10.0f, 72, 72);
+        assignParameterToFinger(currentParameter, currentParameterIcon, ringButton);
     }
     else if (button == &pinkyButton)
     {
-        if (!isPythonOn) { statusDisplay.showMessage("Open Camera first"); return; }
-        if (currentParameter.isEmpty()) { statusDisplay.showMessage("Select a parameter"); return; }
-        if (isAlreadyAssigned(currentParameter)) { statusDisplay.showMessage(currentParameter + " is already mapped!"); return; }
-
-        ensureUniqueAssignment(3);
-        pinkyButton.setIconImage(currentParameterIcon);
-        pinkyButton.setTooltip(currentParameter);
-        statusDisplay.showMessage("Pinky->" + currentParameter);
-        assignGlowToFinger(currentParameter, pinkyGlow, { 437, 382 }, -25.0f, 68, 68);
+        assignParameterToFinger(currentParameter, currentParameterIcon, pinkyButton);
     }
     else if (button == &clearFingersButton)
     {
@@ -1730,32 +2038,13 @@ void CMProjectAudioProcessorEditor::buttonClicked(juce::Button* button)
             return;
         }
 
-        auto clearCircle = [](CircleButton& btn)
-        {
-            btn.setIconImage(juce::Image());
-            btn.repaint();
-            btn.setTooltip({});
-        };
-
         for (int i = 0; i < 4; ++i)
-            audioProcessor.fingerControls[i].clear();
-        audioProcessor.sendFingerAssignementsOSC();
-
-        clearCircle(indexButton);
-        clearCircle(middleButton);
-        clearCircle(ringButton);
-        clearCircle(pinkyButton);
-
-        auto clearGlow = [this](juce::ImageComponent& glow)
         {
-            glow.setVisible(false);
-            glow.setImage(juce::Image(), juce::RectanglePlacement::centred);
-        };
-
-        clearGlow(indexGlow);
-        clearGlow(middleGlow);
-        clearGlow(ringGlow);
-        clearGlow(pinkyGlow);
+            audioProcessor.fingerControls[i].clear();
+            clearFingerAssignmentVisuals(i);
+        }
+        audioProcessor.sendFingerAssignementsOSC();
+        updateFingerTargetVisibility();
 
         statusDisplay.showMessage("Finger mappings cleared");
     }
@@ -1905,7 +2194,11 @@ void CMProjectAudioProcessorEditor::timerCallback()
     if (handVisualizer)
         handVisualizer->tick(juce::Time::getMillisecondCounterHiRes() * 0.001);
 
+    updateFingerTargetVisibility();
     synthPage->repaint(); //force waveform + bar to redraw
+
+    if (isParameterDragActive)
+        repaint();
 
     //Closed the camera from an external X
     if (cameraRunning && !pythonProcess.isRunning())

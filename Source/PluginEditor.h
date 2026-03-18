@@ -88,6 +88,7 @@ public:
     ~CMProjectAudioProcessorEditor() override;
 
     void paint(juce::Graphics&) override;
+    void paintOverChildren(juce::Graphics&) override;
     void resized() override;
     void mouseWheelMove(const juce::MouseEvent& e,
         const juce::MouseWheelDetails& wheel) override;
@@ -150,7 +151,7 @@ private:
         void setIconImage(const juce::Image& img)
         {
             icon = img;
-            hasIcon = true;
+            hasIcon = img.isValid();
             repaint();
         }
         void setZoomFactor(float newZoom) noexcept
@@ -170,6 +171,7 @@ private:
         {
             constexpr float outlineWidth = 2.0f;
             auto bounds = getLocalBounds().toFloat().reduced(outlineWidth * 0.5f);
+            const auto showPreview = previewActive || hasIcon;
 
             if (useSquareStyle)
             {
@@ -186,7 +188,7 @@ private:
             else
             {
                 juce::ColourGradient glow(
-                    juce::Colour::fromFloatRGBA(0.f, 1.f, 1.f, 0.5f),
+                    juce::Colour::fromFloatRGBA(0.f, 1.f, 1.f, dragHover ? 0.90f : (showPreview ? 0.62f : 0.0f)),
                     bounds.getCentreX(), bounds.getCentreY(),
                     juce::Colours::transparentWhite,
                     bounds.getRight(), bounds.getBottom(),
@@ -195,8 +197,11 @@ private:
                 g.setGradientFill(glow);
                 g.fillEllipse(bounds);
 
-                g.setColour(juce::Colours::white.withAlpha(0.7f));
-                g.drawEllipse(bounds, outlineWidth);
+                if (showPreview)
+                {
+                    g.setColour((dragHover ? juce::Colours::limegreen : juce::Colours::white).withAlpha(dragHover ? 0.95f : 0.78f));
+                    g.drawEllipse(bounds, dragHover ? 2.8f : outlineWidth);
+                }
             }
 
             if (hasIcon && icon.isValid())
@@ -222,6 +227,7 @@ private:
         }
         void clearIcon() noexcept
         {
+            icon = juce::Image();
             hasIcon = false;
             repaint();
         }
@@ -232,6 +238,20 @@ private:
                 hasIcon = true;
             repaint();
         }
+
+        void setPreviewActive(bool shouldShow) noexcept
+        {
+            previewActive = shouldShow;
+            repaint();
+        }
+
+        void setDragHover(bool shouldHover) noexcept
+        {
+            dragHover = shouldHover;
+            repaint();
+        }
+
+        bool hasAssignedIcon() const noexcept { return hasIcon; }
         //pointer cursor
         juce::MouseCursor getMouseCursor() override { return juce::MouseCursor::PointingHandCursor; }
     private:
@@ -239,6 +259,8 @@ private:
         bool hasIcon = false;
         float       zoomFactor = 5.0f;  // try 1.5–3.0 for a tighter crop
         bool useSquareStyle = false;
+        bool previewActive = false;
+        bool dragHover = false;
 
     };
 
@@ -255,6 +277,23 @@ private:
         float rotationDeg = 0.0f,
         int targetWidth = 120,
         int targetHeight = 120);
+    bool assignParameterToFinger(const juce::String& parameter,
+                                 const juce::Image& icon,
+                                 CircleButton& fingerButton);
+    void clearFingerAssignmentVisuals(int fingerIndex);
+    bool hasVisibleTrackedHands() const;
+    void updateFingerTargetVisibility();
+    void updateFingerDragHover(juce::Point<float> screenPosition);
+    void beginParameterDrag(const juce::String& parameter,
+                            const juce::Image& icon,
+                            juce::Point<float> screenPosition,
+                            juce::Point<float> dragOrigin);
+    void updateParameterDrag(juce::Point<float> screenPosition);
+    void finishParameterDrag(juce::Point<float> screenPosition);
+    CircleButton* getFingerButtonAtScreenPosition(juce::Point<float> screenPosition);
+    int getFingerIndex(const CircleButton& fingerButton) const noexcept;
+    juce::String getFingerName(const CircleButton& fingerButton) const;
+    juce::Colour getParameterAccentColour(const juce::String& parameter) const;
 
     //Class for the status display
     class StatusDisplay : public juce::Component,
@@ -338,6 +377,12 @@ private:
         juce::String message;
     };
     StatusDisplay statusDisplay;
+    bool isParameterDragActive = false;
+    juce::String draggedParameter;
+    juce::Image draggedParameterIcon;
+    juce::Point<float> dragStartPoint;
+    juce::Point<float> dragCurrentPoint;
+    CircleButton* hoveredFingerButton = nullptr;
 
  // ==================================================
  // look and feel functions for buttons visual effects!
