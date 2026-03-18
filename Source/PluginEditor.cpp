@@ -1011,13 +1011,8 @@ public:
     }
 
     void granulatorParametersTitle() {
-        granulatorTitle.setText("Granulator Parameters", juce::dontSendNotification);
-        granulatorTitle.setFont(juce::Font("Arial", 20.0f, juce::Font::bold));
-        granulatorTitle.setColour(juce::Label::textColourId, juce::Colours::limegreen.withBrightness(1.2f));
-        granulatorTitle.setJustificationType(juce::Justification::centred);
-        auto* shadow = new juce::DropShadowEffect();
-        shadow->setShadowProperties(juce::DropShadow(juce::Colours::limegreen.withAlpha(0.4f), 4.0f, { 1, 1 }));
-        granulatorTitle.setComponentEffect(shadow);
+        granulatorTitle.setText({}, juce::dontSendNotification);
+        granulatorTitle.setVisible(false);
     }
 
     void paint(juce::Graphics& g) override
@@ -1166,12 +1161,9 @@ public:
         area.removeFromTop(10);
         waveformArea = area.removeFromTop(110).withTrimmedLeft(40).withTrimmedRight(40);
         
-        // 3. Granulator Title
+        // 3. Granulator Parameters Grid
         area.removeFromTop(10);
-        granulatorTitle.setBounds(area.removeFromTop(30).withTrimmedLeft(40).withTrimmedRight(40));
-        
-        // 4. Granulator Parameters Grid
-        area.removeFromTop(0);
+        granulatorTitle.setBounds({});
         auto gridArea = area.removeFromTop(120).withTrimmedLeft(40).withTrimmedRight(40);
         
         auto row1 = gridArea.removeFromTop(55);
@@ -1462,11 +1454,13 @@ void CMProjectAudioProcessorEditor::fingersSetUp() {
     pinkyButton.setZoomFactor(2.5f);
     pinkyButton.setVisible(false);
     addAndMakeVisible(statusDisplay); //Status Display
+    statusDisplay.setVisible(false);
 }
 void CMProjectAudioProcessorEditor::clearFingersSetUp() {
     addAndMakeVisible(clearFingersButton);
     clearFingersButton.addListener(this);
     clearFingersButton.setLookAndFeel(&clearFingerButtonLookAndFeel);
+    clearFingersButton.setVisible(false);
 }
 void CMProjectAudioProcessorEditor::midiOnClickSetUpFunction() {
     //Midi on.click setup
@@ -1524,11 +1518,10 @@ void CMProjectAudioProcessorEditor::resized()
     auto fullArea = getLocalBounds();
     synthPage->setBounds(fullArea);
 
-    juce::Rectangle<int> visualizerArea(40, 360, 720, 310); 
+    juce::Rectangle<int> visualizerArea(40, 360, getWidth() - 80, getHeight() - 390);
     if (handVisualizer)
         handVisualizer->setBounds(visualizerArea);
         
-    handOverlay.setBounds(visualizerArea);
 
     // Dynamic scaled mapping over the visualizer region
     float scaleX = visualizerArea.getWidth() / 800.0f;
@@ -1562,14 +1555,8 @@ void CMProjectAudioProcessorEditor::resized()
     const int pinkyY = imageY + pinkyOffy - circleDiameter / 2;
     pinkyButton.setBounds(pinkyX, pinkyY, circleDiameter, circleDiameter);
     
-    auto area = getLocalBounds();
-    int statusY = visualizerArea.getBottom() + 15;
-    
-    // Position status display nicely bottom left
-    statusDisplay.setBounds(40, statusY, 180, 50);
-    
-    // Center the clear fingers button at the bottom
-    clearFingersButton.setBounds(getWidth() / 2 - 75, statusY + 20, 150, 30);
+    statusDisplay.setBounds({});
+    clearFingersButton.setBounds({});
 
     // Plugin title perfectly centered at top
     auto textWidth = pageTitleLabel.getFont().getStringWidth("HAND GRANULATOR");
