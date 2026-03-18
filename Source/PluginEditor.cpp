@@ -907,12 +907,17 @@ public:
     std::function<void(HDImageButton&, const juce::MouseEvent&)> onMouseDragCallback;
     std::function<void(HDImageButton&, const juce::MouseEvent&)> onMouseUpCallback;
 
+    void refreshVisibleBoundsCache()
+    {
+        cachedVisibleBounds = getVisibleBounds(getNormalImage());
+    }
+
     void paintButton(juce::Graphics& g, bool isMouseOver, bool isButtonDown) override
     {
         g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);
         const auto image = getNormalImage();   //This is public
         auto bounds = getLocalBounds().toFloat().reduced(4.0f);
-        auto sourceBounds = getVisibleBounds(image);
+        const auto sourceBounds = cachedVisibleBounds;
 
         if (! image.isValid() || sourceBounds.isEmpty() || bounds.isEmpty())
             return;
@@ -950,6 +955,9 @@ public:
         if (onMouseUpCallback)
             onMouseUpCallback(*this, event);
     }
+
+private:
+    juce::Rectangle<int> cachedVisibleBounds;
 };
 
 // ==================================================
@@ -1316,7 +1324,7 @@ public:
         return juce::ImageFileFormat::loadFrom(imageFile);
     }
 
-    void setupImageButton(juce::ImageButton& button, const juce::File& imageFile)
+    void setupImageButton(HDImageButton& button, const juce::File& imageFile)
     {
         if (!imageFile.existsAsFile())
         {
@@ -1335,6 +1343,7 @@ public:
             img, 1.0f, {},   // normal
             img, 0.7f, {},   // over
             img, 0.5f, {});  // down
+        button.refreshVisibleBoundsCache();
         
        // button.setSize(img.getWidth(), img.getHeight()); // <-- important
         //This ensures that only the visible parts of the image respond to mouse events

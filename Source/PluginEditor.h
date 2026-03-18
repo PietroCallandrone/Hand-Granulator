@@ -241,12 +241,18 @@ private:
 
         void setPreviewActive(bool shouldShow) noexcept
         {
+            if (previewActive == shouldShow)
+                return;
+
             previewActive = shouldShow;
             repaint();
         }
 
         void setDragHover(bool shouldHover) noexcept
         {
+            if (dragHover == shouldHover)
+                return;
+
             dragHover = shouldHover;
             repaint();
         }
