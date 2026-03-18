@@ -300,7 +300,7 @@ private:
     juce::Rectangle<float> getSceneBounds() const
     {
         auto available = getLocalBounds().toFloat().reduced(18.0f, 10.0f);
-        constexpr float aspect = 4.0f / 3.0f;
+        constexpr float aspect = 16.0f / 9.0f;
 
         auto width = available.getWidth();
         auto height = width / aspect;
@@ -972,7 +972,7 @@ public:
         granulatorTitle.setText("Granulator Parameters", juce::dontSendNotification);
         granulatorTitle.setFont(juce::Font("Arial", 20.0f, juce::Font::bold));
         granulatorTitle.setColour(juce::Label::textColourId, juce::Colours::limegreen.withBrightness(1.2f));
-        granulatorTitle.setJustificationType(juce::Justification::centredLeft);
+        granulatorTitle.setJustificationType(juce::Justification::centred);
         auto* shadow = new juce::DropShadowEffect();
         shadow->setShadowProperties(juce::DropShadow(juce::Colours::limegreen.withAlpha(0.4f), 4.0f, { 1, 1 }));
         granulatorTitle.setComponentEffect(shadow);
@@ -1097,44 +1097,58 @@ public:
 
     void resized() override
     {
-        auto area = getLocalBounds().reduced(20, 10);
-        const int topY = area.getY() - 10;
-        stopButton.setBounds(40-15, topY-1.3, 30, 30);
-        startButton.setBounds(80-15, topY-1.3, 28, 30);
-        startCamera.setBounds(120-16, topY-1, 46.5f, 30);
-        stopCamera.setBounds(180-16, topY-1, 46.5f, 30);
-        loadSampleButton.setBounds(40-16, topY+50, 100, 30);
-        resetButton.setBounds(132, topY + 50, 80, 30);
-        area.removeFromTop(30);
-       
-        //single row for all buttons
-        auto buttonRow = area.removeFromTop(30);
-        auto lowerRow = area.removeFromBottom(50);
-        auto lowerRow2 = area.removeFromBottom(100);
-        buttonRow.removeFromLeft(500); // add left margin to push right
-       
-        buttonRow.removeFromLeft(5);
-        buttonRow.removeFromLeft(5);   
-        grainDensity.setBounds(lowerRow.removeFromLeft(50));
+        auto area = getLocalBounds();
+        
+        // 1. Controls at the top
+        auto topRow = area.removeFromTop(80).withTrimmedTop(40).withTrimmedLeft(40).withTrimmedRight(40);
+        
+        // Left side controls
+        auto leftControls = topRow.removeFromLeft(250);
+        
+        // Wrap them nicely close together
+        stopButton.setBounds(leftControls.removeFromLeft(35).withSizeKeepingCentre(30, 30));
+        leftControls.removeFromLeft(5);
+        startButton.setBounds(leftControls.removeFromLeft(35).withSizeKeepingCentre(28, 30));
+        leftControls.removeFromLeft(15); 
+        startCamera.setBounds(leftControls.removeFromLeft(50).withSizeKeepingCentre(46, 30));
+        leftControls.removeFromLeft(5);
+        stopCamera.setBounds(leftControls.removeFromLeft(50).withSizeKeepingCentre(46, 30));
 
-        //move and size of grainCutOff 
-        grainCutOff.setBounds(8, 395, 75, 75); 
-        //move and size of grainPitch 
-        grainPitch.setBounds(10, 470, 75, 75); 
-        //move and size of grainReverse(done)  
-        grainReverse.setBounds(80, 464.5, 86, 86); 
-        //move and size of grainPos 
-        grainPos.setBounds(158.5, 463.7, 86, 86);
-        //move and size of grainDur 
-        grainDur.setBounds(81.5, 391.7, 84, 84);
-        //move and size of grainDensity 
-        grainDensity.setBounds(168, 400, 65, 65);
-        //waveform
-        area.removeFromTop(20);
-        int waveformHeight = 140;
-        waveformArea = area.removeFromTop(waveformHeight);
-        granulatorTitle.setBounds(20, 350, 300, 30);  //Granulator title
-
+        // Right side controls
+        auto rightControls = topRow.removeFromRight(200);
+        loadSampleButton.setBounds(rightControls.removeFromLeft(100).withSizeKeepingCentre(100, 30));
+        rightControls.removeFromLeft(10);
+        resetButton.setBounds(rightControls.removeFromLeft(80).withSizeKeepingCentre(80, 30));
+        
+        // 2. Waveform
+        area.removeFromTop(10);
+        waveformArea = area.removeFromTop(110).withTrimmedLeft(40).withTrimmedRight(40);
+        
+        // 3. Granulator Title
+        area.removeFromTop(10);
+        granulatorTitle.setBounds(area.removeFromTop(30).withTrimmedLeft(40).withTrimmedRight(40));
+        
+        // 4. Granulator Parameters Grid
+        area.removeFromTop(0);
+        auto gridArea = area.removeFromTop(120).withTrimmedLeft(40).withTrimmedRight(40);
+        
+        auto row1 = gridArea.removeFromTop(55);
+        gridArea.removeFromTop(10); // gap between rows
+        auto row2 = gridArea.removeFromTop(55);
+        
+        int boxWidth = (row1.getWidth() - 30) / 3;
+        
+        grainPos.setBounds(row1.removeFromLeft(boxWidth));
+        row1.removeFromLeft(15);
+        grainDur.setBounds(row1.removeFromLeft(boxWidth));
+        row1.removeFromLeft(15);
+        grainDensity.setBounds(row1.removeFromLeft(boxWidth));
+        
+        grainReverse.setBounds(row2.removeFromLeft(boxWidth));
+        row2.removeFromLeft(15);
+        grainPitch.setBounds(row2.removeFromLeft(boxWidth));
+        row2.removeFromLeft(15);
+        grainCutOff.setBounds(row2.removeFromLeft(boxWidth));
     }
 
     void setupImageButton(juce::ImageButton& button, const juce::File& imageFile)
@@ -1333,7 +1347,7 @@ CMProjectAudioProcessorEditor::CMProjectAudioProcessorEditor(CMProjectAudioProce
     setToolTipFunction(); //Function that handles all the toolTip functions for both Synth and Drum page
     addListenerToGLobal(); //function that sets all the addListeners
     fingersSetUp(); //Function that setUps the fingers
-    setSize(950, 750); //Total size of the plugin
+    setSize(800, 750); //Total size of the plugin matching the new portrait layout
     startTimerHz(60); //starting camerapython timer
 }
 
@@ -1485,68 +1499,52 @@ void CMProjectAudioProcessorEditor::resized()
     if (background)
         background->setBounds(getLocalBounds());
 
-    if (handVisualizer)
-        handVisualizer->setBounds(55, 365, 820, 340);
-
     auto fullArea = getLocalBounds();
-
-    auto areas = getLocalBounds(); //the whole plugin window
-    juce::ignoreUnused(areas);
-
     synthPage->setBounds(fullArea);
 
-    handOverlay.setBounds(65, 380, 800, 350); //Hands dimension and displacement
+    juce::Rectangle<int> visualizerArea(40, 360, 720, 310); 
+    if (handVisualizer)
+        handVisualizer->setBounds(visualizerArea);
+        
+    handOverlay.setBounds(visualizerArea);
 
-    const auto imageX = 50;
-    const auto imageY = 395;
+    // Dynamic scaled mapping over the visualizer region
+    float scaleX = visualizerArea.getWidth() / 800.0f;
+    float scaleY = visualizerArea.getHeight() / 350.0f;
+    float imageX = visualizerArea.getX() - (15.0f * scaleX);
+    float imageY = visualizerArea.getY() + (15.0f * scaleY);
     const auto circleDiameter = 20;
 
-    //Values of the dot to perfectly sit on the index finger
-    const int dotX = imageX + 560 - circleDiameter / 2;
-    const int dotY = imageY + 15 - circleDiameter / 2;
-    const int dotLeftX = imageX + 272 - circleDiameter / 2;
+    auto placeDot = [&](float offX, float offY, juce::Component& btn) {
+        int cx = (int)(imageX + offX * scaleX);
+        int cy = (int)(imageY + offY * scaleY);
+        btn.setBounds(cx - circleDiameter / 2, cy - circleDiameter / 2, circleDiameter, circleDiameter);
+    };
 
-    indexButton.setBounds(dotX, dotY, circleDiameter, circleDiameter);
-    indexRightButton.setBounds(dotX, dotY, circleDiameter, circleDiameter);
-    indexLeftButton.setBounds(dotLeftX, dotY, circleDiameter, circleDiameter);
-    //Values of the dot to perfectly sit on the middle finger
-    const int midOffsetX = 511.8;
-    const int midLeftOff = 317;
-    const int midOffsetY = 3.9;
-    const int midX = imageX + midOffsetX - circleDiameter / 2;
-    const int midLx= imageX + midLeftOff - circleDiameter / 2;
-    const int midY = imageY + midOffsetY - circleDiameter / 2;
-    middleButton.setBounds(midX, midY, circleDiameter, circleDiameter);
-    middleRightButton.setBounds(midX, midY, circleDiameter, circleDiameter);
-    middleLeftButton.setBounds(midLx, midY, circleDiameter, circleDiameter);
-    //Values of the dot to perfectly sit on the ring finger
-    const int ringOffx = 468;
-    const int ringOffy = 17;
-    const int ringX = imageX + ringOffx - circleDiameter / 2;
-    const int ringY = imageY + ringOffy - circleDiameter / 2;
-    ringButton.setBounds(ringX, ringY, circleDiameter, circleDiameter);
-
-    //Values of the dot to perfectly sit on the pinky finger
-    const int pinkyOffx = 438;
-    const int pinkyOffy = 62;
-    const int pinkyX = imageX + pinkyOffx - circleDiameter / 2;
-    const int pinkyY = imageY + pinkyOffy - circleDiameter / 2;
-    pinkyButton.setBounds(pinkyX, pinkyY, circleDiameter, circleDiameter);
+    placeDot(560.0f, 15.0f, indexButton);
+    placeDot(560.0f, 15.0f, indexRightButton);
+    placeDot(272.0f, 15.0f, indexLeftButton);
+    
+    placeDot(511.8f, 3.9f, middleButton);
+    placeDot(511.8f, 3.9f, middleRightButton);
+    placeDot(317.0f, 3.9f, middleLeftButton);
+    
+    placeDot(468.0f, 17.0f, ringButton);
+    placeDot(438.0f, 62.0f, pinkyButton);
     
     auto area = getLocalBounds();
-    auto boxW = 180;
-    auto boxH = 50;
-    int statusX = 2;     // horizontal offset from the left
-    int statusY = getHeight() - boxH - 2; // vertical offset from the bottom
-    statusDisplay.setBounds(statusX, statusY, boxW, boxH);
-    clearFingersButton.setBounds(statusX + 190, statusY + 10, 100, 30);
-    //plugin title
-    auto textWidth = pageTitleLabel.getFont().getStringWidth("HAND GRANULATOR");
-    int padding = 20;
-    int totalWidth = textWidth + padding;
+    int statusY = visualizerArea.getBottom() + 15;
+    
+    // Position status display nicely bottom left
+    statusDisplay.setBounds(40, statusY, 180, 50);
+    
+    // Center the clear fingers button at the bottom
+    clearFingersButton.setBounds(getWidth() / 2 - 75, statusY + 20, 150, 30);
 
-    pageTitleLabel.setBounds(getWidth() / 2 - totalWidth / 2 + 5 , 5, totalWidth, 40);
-  
+    // Plugin title perfectly centered at top
+    auto textWidth = pageTitleLabel.getFont().getStringWidth("HAND GRANULATOR");
+    int totalWidth = textWidth + 20;
+    pageTitleLabel.setBounds(getWidth() / 2 - totalWidth / 2 , 5, totalWidth, 40);
 
 }
 void CMProjectAudioProcessorEditor::mouseWheelMove(const juce::MouseEvent& e,

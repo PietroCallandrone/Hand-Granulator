@@ -26,10 +26,6 @@ CMProjectAudioProcessor::CMProjectAudioProcessor()
 {
     formatManager.registerBasicFormats();
     updateParameters();
-    auto devices = juce::MidiInput::getAvailableDevices();
-    for (auto& d : devices)
-    DBG("MIDI Device: " + d.name);
-
 }
 
 CMProjectAudioProcessor::~CMProjectAudioProcessor()
@@ -545,6 +541,5 @@ void CMProjectAudioProcessor::spawnGrain()
 
     activeGrains.push_back(grain);
 }
-
 
 
