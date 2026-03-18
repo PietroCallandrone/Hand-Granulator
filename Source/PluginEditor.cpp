@@ -1103,53 +1103,88 @@ public:
             juce::Graphics::ScopedSaveState waveformClipState(g);
 
             constexpr float waveformCornerRadius = 8.0f;
+            const auto waveformBounds = waveformArea.toFloat();
+            const auto waveformInnerBounds = waveformBounds.reduced(2.0f);
+            const auto waveformCentreY = waveformBounds.getCentreY();
+            float normPos = 0.0f;
+            float indicatorX = waveformBounds.getX();
+
+            if (sampleDuration > 0.0f)
+            {
+                normPos = juce::jlimit(0.0f, 1.0f, currentGrainPos / sampleDuration);
+                indicatorX = waveformBounds.getX() + normPos * waveformBounds.getWidth();
+            }
 
             juce::Path clipPath;
-            clipPath.addRoundedRectangle(waveformArea.toFloat(), waveformCornerRadius);
+            clipPath.addRoundedRectangle(waveformBounds, waveformCornerRadius);
             g.reduceClipRegion(clipPath);
 
-            juce::Colour bgBottom = juce::Colour::fromRGBA(12, 18, 16, 230);
-            juce::Colour bgTop = juce::Colour::fromRGBA(62, 78, 74, 170);
+            juce::Colour bgBottom = juce::Colour::fromRGBA(5, 5, 7, 246);
+            juce::Colour bgTop = juce::Colour::fromRGBA(52, 54, 58, 188);
             juce::ColourGradient bg(bgBottom,
                 waveformArea.getX(), waveformArea.getBottom(),
                 bgTop,
                 waveformArea.getRight(), waveformArea.getY(),
                 false);
-            bg.addColour(0.45, juce::Colour::fromRGBA(150, 190, 178, 58));
+            bg.addColour(0.30, juce::Colour::fromRGBA(92, 96, 102, 26));
+            bg.addColour(0.68, juce::Colour::fromRGBA(12, 14, 18, 214));
             g.setGradientFill(bg);
             g.fillRect(waveformArea);
 
+            juce::ColourGradient centerGlow(
+                juce::Colour::fromRGBA(255, 255, 255, 8),
+                waveformBounds.getCentreX(), waveformCentreY,
+                juce::Colour::fromRGBA(0, 0, 0, 0),
+                waveformBounds.getRight(), waveformCentreY,
+                true);
+            g.setGradientFill(centerGlow);
+            g.fillEllipse(waveformBounds.expanded(waveformBounds.getWidth() * 0.08f, waveformBounds.getHeight() * 0.18f));
+
             juce::ColourGradient innerTint(
-                juce::Colour::fromRGBA(255, 255, 255, 42),
+                juce::Colour::fromRGBA(255, 255, 255, 52),
                 waveformArea.getCentreX(), waveformArea.getY(),
-                juce::Colour::fromRGBA(170, 255, 220, 16),
+                juce::Colour::fromRGBA(180, 186, 196, 10),
                 waveformArea.getCentreX(), waveformArea.getBottom(),
                 false);
-            innerTint.addColour(0.5, juce::Colour::fromRGBA(255, 255, 255, 12));
+            innerTint.addColour(0.5, juce::Colour::fromRGBA(255, 255, 255, 14));
             g.setGradientFill(innerTint);
             g.fillRect(waveformArea.reduced(1));
 
             if (thumbnail.getTotalLength() > 0.0)
             {
-                g.setColour(juce::Colours::limegreen.withBrightness(1.2f));
-                thumbnail.drawChannel(g, waveformArea.translated(0.5f, 0.0f), 0.0, thumbnail.getTotalLength(), 0, 1.0f);
+                g.setColour(juce::Colours::limegreen.withBrightness(1.35f));
                 thumbnail.drawChannel(g, waveformArea, 0.0, thumbnail.getTotalLength(), 0, 1.0f);
+
+                if (sampleDuration > 0.0f && thumbnail.getTotalLength() > 0.0)
+                {
+                    juce::Graphics::ScopedSaveState focusState(g);
+                    juce::Path focusClip;
+                    focusClip.addRectangle(indicatorX - waveformBounds.getWidth() * 0.02f,
+                                           waveformBounds.getY(),
+                                           waveformBounds.getWidth() * 0.04f,
+                                           waveformBounds.getHeight());
+                    g.reduceClipRegion(focusClip);
+
+                    g.setColour(juce::Colour::fromRGBA(120, 255, 170, 40));
+                    thumbnail.drawChannel(g, waveformArea.expanded(1, 0), 0.0, thumbnail.getTotalLength(), 0, 1.22f);
+                    g.setColour(juce::Colour::fromRGBA(225, 255, 235, 78));
+                    thumbnail.drawChannel(g, waveformArea, 0.0, thumbnail.getTotalLength(), 0, 1.08f);
+                }
             }
 
-                // ==== Draw GrainPos Indicator ====
-                if (sampleDuration > 0.0f)
-                {
-                    float normPos = juce::jlimit(0.0f, 1.0f, currentGrainPos / sampleDuration);
-                    int x = waveformArea.getX() + (int)(normPos * waveformArea.getWidth());
+            if (sampleDuration > 0.0f)
+            {
+                g.setColour(juce::Colour::fromRGBA(20, 255, 120, 44));
+                g.drawLine(indicatorX, waveformBounds.getY() + 6.0f, indicatorX, waveformBounds.getBottom() - 6.0f, 4.0f);
 
-                    g.setColour(juce::Colours::white.withAlpha(0.85f));
-                    g.drawLine((float)x, (float)waveformArea.getY(), (float)x, (float)waveformArea.getBottom(), 2.0f);
-                }
+                g.setColour(juce::Colour::fromRGBA(74, 255, 128, 240));
+                g.drawLine(indicatorX, waveformBounds.getY() + 6.0f, indicatorX, waveformBounds.getBottom() - 6.0f, 1.6f);
+            }
 
 
             auto glassRect = waveformArea.withHeight(waveformArea.getHeight() / 3);
             juce::ColourGradient glassGradient(
-                juce::Colour::fromRGBA(255, 255, 255, 88),
+                juce::Colour::fromRGBA(255, 255, 255, 96),
                 glassRect.getX(), glassRect.getY(),
                 juce::Colour::fromRGBA(255, 255, 255, 0),
                 glassRect.getX(), glassRect.getBottom(),
@@ -1169,11 +1204,24 @@ public:
             g.setColour(juce::Colour::fromRGBA(255, 255, 255, 26));
             g.fillPath(sheenPath);
 
-            g.setColour(juce::Colour::fromRGBA(255, 255, 255, 110));
-            g.drawRoundedRectangle(waveformArea.toFloat().reduced(0.75f), waveformCornerRadius, 1.0f);
+            juce::ColourGradient lowerShade(
+                juce::Colour::fromRGBA(0, 0, 0, 0),
+                waveformBounds.getCentreX(), waveformBounds.getCentreY(),
+                juce::Colour::fromRGBA(0, 0, 0, 110),
+                waveformBounds.getCentreX(), waveformBounds.getBottom(),
+                false);
+            g.setGradientFill(lowerShade);
+            g.fillRect(waveformArea.withTrimmedTop(waveformArea.getHeight() / 2));
 
-            g.setColour(juce::Colour::fromRGBA(255, 255, 255, 34));
-            g.drawRoundedRectangle(waveformArea.toFloat().reduced(2.0f), waveformCornerRadius - 1.25f, 1.0f);
+            g.setColour(juce::Colour::fromRGBA(74, 255, 128, 170));
+            g.drawRoundedRectangle(waveformBounds.reduced(0.75f), waveformCornerRadius, 1.4f);
+
+            g.setColour(juce::Colour::fromRGBA(140, 255, 176, 44));
+            g.drawRoundedRectangle(waveformInnerBounds, waveformCornerRadius - 1.25f, 1.2f);
+
+            g.setColour(juce::Colour::fromRGBA(0, 0, 0, 105));
+            g.drawLine(waveformBounds.getX() + 6.0f, waveformBounds.getBottom() - 2.5f,
+                       waveformBounds.getRight() - 6.0f, waveformBounds.getBottom() - 2.5f, 1.8f);
         }
     }
 
