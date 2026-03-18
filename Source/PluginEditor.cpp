@@ -1325,7 +1325,6 @@ CMProjectAudioProcessorEditor::CMProjectAudioProcessorEditor(CMProjectAudioProce
     : AudioProcessorEditor(&p), audioProcessor(p), tooltipWindow(this, 300)
 {
     startingConfigurationGlobal(); //Function that handles the starting configuration
-    loadHandiImageFromPath(); //function that handles the upload of the hand image
     clearFingersSetUp(); //Function that handles ClearFingers setup
     setToolTipFunction(); //Function that handles all the toolTip functions for both Synth and Drum page
     midiOnClickSetUpFunction(); //Function that handles all the oneclick setup functions
@@ -1352,8 +1351,6 @@ CMProjectAudioProcessorEditor::~CMProjectAudioProcessorEditor()
         middleButton.removeListener(this);
         ringButton.removeListener(this);
         pinkyButton.removeListener(this);
-        indexLeftButton.removeListener(this);
-        middleLeftButton.removeListener(this);
         clearLookAndFeelRecursively (this);
         
         delete synthPage;
@@ -1395,34 +1392,20 @@ void CMProjectAudioProcessorEditor::fingersSetUp() {
     addAndMakeVisible(indexButton); //Index Finger
     indexButton.addListener(this);
     indexButton.setZoomFactor(2.5f);
+    indexButton.setVisible(false);
     addAndMakeVisible(middleButton); //Middle Finger
     middleButton.addListener(this);
     middleButton.setZoomFactor(2.5f);
+    middleButton.setVisible(false);
     addAndMakeVisible(ringButton); //Ring Finger
     ringButton.addListener(this);
     ringButton.setZoomFactor(2.5f);
+    ringButton.setVisible(false);
     addAndMakeVisible(pinkyButton); //Pinky Finger
     pinkyButton.addListener(this);
     pinkyButton.setZoomFactor(2.5f);
+    pinkyButton.setVisible(false);
     addAndMakeVisible(statusDisplay); //Status Display
-    addAndMakeVisible(indexLeftButton); //IndexLeftFinger
-    indexLeftButton.addListener(this);
-    indexLeftButton.setZoomFactor(2.5f);
-    indexLeftButton.setVisible(false);     
-    addAndMakeVisible(middleLeftButton); //MIddleLeftFinger
-    middleLeftButton.addListener(this);
-    middleLeftButton.setZoomFactor(2.5f);
-    middleLeftButton.setVisible(false);    
-    addAndMakeVisible(indexRightButton); //IndexRightFinger
-    indexRightButton.addListener(this);
-    indexRightButton.setZoomFactor(2.5f);
-    indexRightButton.setVisible(false);
-    addAndMakeVisible(middleRightButton); //IndexRightFinger
-    middleRightButton.addListener(this);
-    middleRightButton.setZoomFactor(2.5f);
-    middleRightButton.setVisible(false);
-
-
 }
 void CMProjectAudioProcessorEditor::clearFingersSetUp() {
     addAndMakeVisible(clearFingersButton);
@@ -1459,9 +1442,6 @@ void CMProjectAudioProcessorEditor::midiOnClickSetUpFunction() {
             synthPage->recordMidiButton.setEnabled(true);
         };
 }
-void CMProjectAudioProcessorEditor::loadHandiImageFromPath() {
-    handOverlay.setVisible(false);
-}
 void CMProjectAudioProcessorEditor::addListenerToGLobal() {
     synthPage->startCamera.addListener(this);
     synthPage->stopCamera.addListener(this);
@@ -1495,8 +1475,6 @@ void CMProjectAudioProcessorEditor::resized()
 
     synthPage->setBounds(fullArea);
 
-    handOverlay.setBounds(65, 380, 800, 350); //Hands dimension and displacement
-
     const auto imageX = 50;
     const auto imageY = 395;
     const auto circleDiameter = 20;
@@ -1504,21 +1482,14 @@ void CMProjectAudioProcessorEditor::resized()
     //Values of the dot to perfectly sit on the index finger
     const int dotX = imageX + 560 - circleDiameter / 2;
     const int dotY = imageY + 15 - circleDiameter / 2;
-    const int dotLeftX = imageX + 272 - circleDiameter / 2;
 
     indexButton.setBounds(dotX, dotY, circleDiameter, circleDiameter);
-    indexRightButton.setBounds(dotX, dotY, circleDiameter, circleDiameter);
-    indexLeftButton.setBounds(dotLeftX, dotY, circleDiameter, circleDiameter);
     //Values of the dot to perfectly sit on the middle finger
     const int midOffsetX = 511.8;
-    const int midLeftOff = 317;
     const int midOffsetY = 3.9;
     const int midX = imageX + midOffsetX - circleDiameter / 2;
-    const int midLx= imageX + midLeftOff - circleDiameter / 2;
     const int midY = imageY + midOffsetY - circleDiameter / 2;
     middleButton.setBounds(midX, midY, circleDiameter, circleDiameter);
-    middleRightButton.setBounds(midX, midY, circleDiameter, circleDiameter);
-    middleLeftButton.setBounds(midLx, midY, circleDiameter, circleDiameter);
     //Values of the dot to perfectly sit on the ring finger
     const int ringOffx = 468;
     const int ringOffy = 17;
