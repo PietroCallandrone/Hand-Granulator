@@ -638,17 +638,17 @@ public:
 
     }
     void imagesSetup() {
-        juce::File grainPosFile = getIconFile("grainPos.png");
+        juce::File grainPosFile = getIconFile("grainPosButton.png");
         setupImageButton(grainPos, grainPosFile);
-        juce::File grainDurFile = getIconFile("grainDur.png");
+        juce::File grainDurFile = getIconFile("grainDurButton.png");
         setupImageButton(grainDur, grainDurFile);
-        juce::File grainDensityFile = getIconFile("grainDensity.png");
+        juce::File grainDensityFile = getIconFile("grainDensityButton.png");
         setupImageButton(grainDensity, grainDensityFile);
-        juce::File grainCutOffFile = getIconFile("grainCutOff.png");
+        juce::File grainCutOffFile = getIconFile("grainCutOffButton.png");
         setupImageButton(grainCutOff, grainCutOffFile);
-        juce::File grainPitchFile = getIconFile("grainPitch.png");
+        juce::File grainPitchFile = getIconFile("grainPitchButton.png");
         setupImageButton(grainPitch, grainPitchFile);
-        juce::File grainReverseFile = getIconFile("grainReverse.png");
+        juce::File grainReverseFile = getIconFile("grainReverseButton.png");
         setupImageButton(grainReverse, grainReverseFile);
     }
 
@@ -852,23 +852,53 @@ public:
         grainDensity.setBounds(lowerRow.removeFromLeft(50));
 
         //move and size of grainCutOff 
-        grainCutOff.setBounds(8, 395, 75, 75); 
+        grainCutOff.setBounds(8, 406, 75, 75); 
         //move and size of grainPitch 
-        grainPitch.setBounds(10, 470, 75, 75); 
+        grainPitch.setBounds(7, 560, 110, 110); 
         //move and size of grainReverse(done)  
-        grainReverse.setBounds(80, 464.5, 86, 86); 
+        grainReverse.setBounds(80, 484.5, 110, 110); 
         //move and size of grainPos 
-        grainPos.setBounds(158.5, 463.7, 86, 86);
+        grainPos.setBounds(158.5, 483.7, 110, 110);
         //move and size of grainDur 
-        grainDur.setBounds(81.5, 391.7, 84, 84);
+        grainDur.setBounds(81.5, 411.7, 110, 110);
         //move and size of grainDensity 
-        grainDensity.setBounds(168, 400, 65, 65);
+        grainDensity.setBounds(168, 415, 110, 110);
         //waveform
         area.removeFromTop(20);
         int waveformHeight = 140;
         waveformArea = area.removeFromTop(waveformHeight);
         granulatorTitle.setBounds(20, 350, 300, 30);  //Granulator title
 
+    }
+
+    static juce::Image loadButtonImage(const juce::File& imageFile)
+    {
+        if (imageFile.hasFileExtension(".svg"))
+        {
+            auto svg = juce::XmlDocument::parse(imageFile);
+
+            if (svg == nullptr)
+                return {};
+
+            auto drawable = juce::Drawable::createFromSVG(*svg);
+
+            if (drawable == nullptr)
+                return {};
+
+            auto bounds = drawable->getDrawableBounds();
+            auto width = juce::jmax(1, juce::roundToInt(bounds.getWidth()));
+            auto height = juce::jmax(1, juce::roundToInt(bounds.getHeight()));
+            juce::Image image(juce::Image::ARGB, width, height, true);
+            juce::Graphics g(image);
+
+            drawable->drawWithin(g,
+                                 juce::Rectangle<float>(0.0f, 0.0f, (float) width, (float) height),
+                                 juce::RectanglePlacement::centred,
+                                 1.0f);
+            return image;
+        }
+
+        return juce::ImageFileFormat::loadFrom(imageFile);
     }
 
     void setupImageButton(juce::ImageButton& button, const juce::File& imageFile)
@@ -878,7 +908,13 @@ public:
             DBG("❌ Could not find image: " + imageFile.getFullPathName());
             return;
         }
-        juce::Image img = juce::ImageFileFormat::loadFrom(imageFile);
+        juce::Image img = loadButtonImage(imageFile);
+
+        if (!img.isValid())
+        {
+            DBG("Could not load image: " + imageFile.getFullPathName());
+            return;
+        }
 
         button.setImages(false, true, true,
             img, 1.0f, {},   // normal
