@@ -1,6 +1,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include <JuceHeader.h>
+#include <algorithm>
 #include <cmath>
 #include <vector>
 
@@ -354,7 +355,13 @@ private:
                   int handIndex,
                   const VisualHand& hand) const
     {
-        const auto mapped = mapHand(scene, hand);
+        auto mapped = mapHand(scene, hand);
+        shortenFinger(mapped, std::array<int, 4>{ 1, 2, 3, 4 }, 0.900f);
+        shortenFinger(mapped, std::array<int, 4>{ 5, 6, 7, 8 }, 0.900f);
+        shortenFinger(mapped, std::array<int, 4>{ 9, 10, 11, 12 }, 0.905f);
+        shortenFinger(mapped, std::array<int, 4>{ 13, 14, 15, 16 }, 0.900f);
+        shortenFinger(mapped, std::array<int, 4>{ 17, 18, 19, 20 }, 0.885f);
+
         const auto baseColour = getHandColour(handIndex, 0.98f * hand.visibility);
         const auto shadowColour = juce::Colour::fromRGB(0, 0, 0).withAlpha(0.42f * hand.visibility);
         const auto outlineColour = juce::Colour::fromRGB(8, 46, 18).withAlpha(0.92f * hand.visibility);
@@ -362,11 +369,12 @@ private:
 
         drawPalmVolume(g, mapped, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
 
-        drawFingerVolume(g, mapped, std::array<int, 4>{ 1, 2, 3, 4 }, handIndex == 0, 22.0f, 18.0f, 14.0f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
-        drawFingerVolume(g, mapped, std::array<int, 4>{ 5, 6, 7, 8 }, false,         24.0f, 20.0f, 15.0f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
-        drawFingerVolume(g, mapped, std::array<int, 4>{ 9, 10, 11, 12 }, false,      26.0f, 21.0f, 16.0f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
-        drawFingerVolume(g, mapped, std::array<int, 4>{ 13, 14, 15, 16 }, false,     24.0f, 19.0f, 14.0f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
-        drawFingerVolume(g, mapped, std::array<int, 4>{ 17, 18, 19, 20 }, false,     20.0f, 16.0f, 12.0f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
+        drawFingerVolume(g, mapped, std::array<int, 4>{ 1, 2, 3, 4 }, handIndex == 0, 20.5f, 16.8f, 13.0f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
+        drawFingerVolume(g, mapped, std::array<int, 4>{ 5, 6, 7, 8 }, false,         22.2f, 18.4f, 13.8f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
+        drawFingerVolume(g, mapped, std::array<int, 4>{ 9, 10, 11, 12 }, false,      24.0f, 19.4f, 14.6f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
+        drawFingerVolume(g, mapped, std::array<int, 4>{ 13, 14, 15, 16 }, false,     22.0f, 17.6f, 13.2f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
+        drawFingerVolume(g, mapped, std::array<int, 4>{ 17, 18, 19, 20 }, false,     18.4f, 14.8f, 11.0f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
+        drawPinchConnectors(g, mapped, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
 
         drawPalmCreases(g, mapped, outlineColour, highlightColour, hand.visibility);
 
@@ -388,6 +396,16 @@ private:
     juce::Point<float> pointAlong(juce::Point<float> a, juce::Point<float> b, float amount) const
     {
         return { juce::jmap(amount, a.x, b.x), juce::jmap(amount, a.y, b.y) };
+    }
+
+    void shortenFinger(std::array<juce::Point<float>, 21>& points,
+                       std::array<int, 4> indices,
+                       float scale) const
+    {
+        const auto base = points[(size_t) indices[0]];
+
+        for (size_t i = 1; i < indices.size(); ++i)
+            points[(size_t) indices[i]] = pointAlong(base, points[(size_t) indices[i]], scale);
     }
 
     juce::Point<float> perpendicular(juce::Point<float> from, juce::Point<float> to) const
@@ -482,6 +500,67 @@ private:
         g.drawLine({ start - normal * (width * 0.14f), end - normal * (width * 0.14f) }, juce::jmax(1.0f, width * 0.16f));
     }
 
+    juce::Path createFingerShape(const std::array<juce::Point<float>, 21>& points,
+                                 std::array<int, 4> indices,
+                                 float width0,
+                                 float width1,
+                                 float width2) const
+    {
+        const std::array<float, 4> radii {
+            width0 * 0.50f,
+            width1 * 0.47f,
+            width2 * 0.43f,
+            width2 * 0.30f
+        };
+
+        std::vector<juce::Point<float>> leftSide;
+        std::vector<juce::Point<float>> rightSide;
+
+        for (size_t i = 0; i < indices.size(); ++i)
+        {
+            const auto current = points[(size_t) indices[i]];
+            const auto prevIndex = (i == 0) ? indices[0] : indices[i - 1];
+            const auto nextIndex = (i == indices.size() - 1) ? indices[i] : indices[i + 1];
+            const auto prev = points[(size_t) prevIndex];
+            const auto next = points[(size_t) nextIndex];
+            const auto normal = perpendicular(prev, next);
+
+            leftSide.push_back(current + normal * radii[i]);
+            rightSide.push_back(current - normal * radii[i]);
+        }
+
+        std::reverse(rightSide.begin(), rightSide.end());
+        leftSide.insert(leftSide.end(), rightSide.begin(), rightSide.end());
+
+        return makeSmoothPath(leftSide, true);
+    }
+
+    void fillFingerShape(juce::Graphics& g,
+                         const juce::Path& shape,
+                         juce::Colour fill,
+                         juce::Colour shadow,
+                         juce::Colour outline,
+                         juce::Colour highlight) const
+    {
+        const auto bounds = shape.getBounds();
+
+        juce::ColourGradient fingerGradient(
+            highlight.interpolatedWith(fill, 0.76f),
+            bounds.getX() + bounds.getWidth() * 0.20f, bounds.getY() + bounds.getHeight() * 0.08f,
+            shadow.interpolatedWith(fill, 0.44f),
+            bounds.getRight(), bounds.getBottom(),
+            false);
+
+        g.setColour(shadow.withAlpha(shadow.getFloatAlpha() * 0.42f));
+        g.fillPath(shape, juce::AffineTransform::translation(bounds.getWidth() * 0.025f, bounds.getHeight() * 0.035f));
+
+        g.setGradientFill(fingerGradient);
+        g.fillPath(shape);
+
+        g.setColour(outline.withAlpha(0.65f));
+        g.strokePath(shape, juce::PathStrokeType(1.3f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
+
     void drawPalmVolume(juce::Graphics& g,
                         const std::array<juce::Point<float>, 21>& points,
                         juce::Colour fill,
@@ -497,17 +576,14 @@ private:
         const auto bounds = palmPath.getBounds();
 
         juce::ColourGradient palmGradient(
-            highlight.interpolatedWith(fill, 0.65f),
+            highlight.interpolatedWith(fill, 0.82f),
             bounds.getX() + bounds.getWidth() * 0.18f, bounds.getY() + bounds.getHeight() * 0.08f,
-            shadow.interpolatedWith(fill, 0.45f),
+            fill.interpolatedWith(juce::Colour::fromRGB(76, 255, 124), 0.22f),
             bounds.getRight(), bounds.getBottom(),
             false);
 
         g.setGradientFill(palmGradient);
         g.fillPath(palmPath);
-
-        g.setColour(shadow.withAlpha(shadow.getFloatAlpha() * 0.75f));
-        g.fillEllipse(points[1].x - 30.0f, points[1].y - 36.0f, 76.0f, 90.0f);
 
         g.setColour(outline.withAlpha(0.65f));
         g.strokePath(outlinePath, juce::PathStrokeType(2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
@@ -534,18 +610,71 @@ private:
                           float visibility) const
     {
         juce::ignoreUnused(visibility);
+        const auto segmentFill = thumb
+            ? fill.interpolatedWith(juce::Colour::fromRGB(138, 245, 168), 0.07f)
+            : fill.interpolatedWith(juce::Colour::fromRGB(148, 255, 176), 0.10f);
 
-        const std::array<float, 3> widths { width0, width1, width2 };
+        const auto fingerShape = createFingerShape(points, indices, width0, width1, width2);
+        fillFingerShape(g, fingerShape, segmentFill, shadow, outline, highlight);
+
+        const std::array<float, 3> creaseWidths {
+            juce::jmax(1.0f, width0 * 0.07f),
+            juce::jmax(1.0f, width1 * 0.07f),
+            juce::jmax(1.0f, width2 * 0.07f)
+        };
 
         for (size_t segment = 0; segment < 3; ++segment)
         {
             const auto start = points[(size_t) indices[segment]];
             const auto end = points[(size_t) indices[segment + 1]];
-            const auto blend = (float) segment / 2.0f;
-            const auto segmentFill = fill.interpolatedWith(juce::Colour::fromRGB(148, 255, 176), 0.08f + blend * 0.12f);
-            fillSoftStroke(g, start, end, widths[segment], segmentFill, shadow, outline, highlight);
-        }
+            const auto mid = pointAlong(start, end, 0.52f);
+            const auto normal = perpendicular(start, end);
+            const auto halfWidth = (segment == 0 ? width0 : (segment == 1 ? width1 : width2)) * 0.28f;
 
+            g.setColour(outline.withAlpha(0.32f));
+            g.drawLine({ mid + normal * halfWidth, mid - normal * halfWidth }, creaseWidths[segment]);
+
+            g.setColour(highlight.withAlpha(0.10f));
+            g.drawLine({ mid + normal * (halfWidth * 0.55f), mid - normal * (halfWidth * 0.55f) }, 1.0f);
+        }
+    }
+
+    void drawPinchConnectors(juce::Graphics& g,
+                             const std::array<juce::Point<float>, 21>& points,
+                             juce::Colour fill,
+                             juce::Colour shadow,
+                             juce::Colour outline,
+                             juce::Colour highlight,
+                             float visibility) const
+    {
+        const auto thumbTip = points[4];
+        const std::array<int, 4> otherTips { 8, 12, 16, 20 };
+        const std::array<float, 4> widths { 12.0f, 13.0f, 11.0f, 9.0f };
+
+        for (size_t i = 0; i < otherTips.size(); ++i)
+        {
+            const auto otherTip = points[(size_t) otherTips[i]];
+            const auto distance = thumbTip.getDistanceFrom(otherTip);
+            const float threshold = 58.0f;
+
+            if (distance >= threshold)
+                continue;
+
+            const auto t = juce::jlimit(0.0f, 1.0f, 1.0f - (distance / threshold));
+            const auto connectorWidth = juce::jmap(t, widths[i] * 0.55f, widths[i] * 1.05f);
+            const auto start = pointAlong(thumbTip, otherTip, 0.18f);
+            const auto end = pointAlong(thumbTip, otherTip, 0.82f);
+
+            fillSoftStroke(
+                g,
+                start,
+                end,
+                connectorWidth,
+                fill.interpolatedWith(juce::Colour::fromRGB(148, 255, 176), 0.10f).withAlpha(0.95f * visibility),
+                shadow.withAlpha((0.20f + 0.18f * t) * visibility),
+                outline.withAlpha((0.55f + 0.20f * t) * visibility),
+                highlight.withAlpha((0.12f + 0.10f * t) * visibility));
+        }
     }
 
     void drawPalmCreases(juce::Graphics& g,
