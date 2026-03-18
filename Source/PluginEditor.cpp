@@ -1,6 +1,9 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include <JuceHeader.h>
+#include <algorithm>
+#include <cmath>
+#include <vector>
 
 #if JUCE_MAC
  #include <dlfcn.h>
@@ -294,18 +297,10 @@ private:
         std::array<juce::Point<float>, 21> smoothed {};
     };
 
-    static constexpr int handConnections[][2] = {
-        { 0, 1 }, { 1, 2 }, { 2, 3 }, { 3, 4 }, { 0, 5 },
-        { 5, 6 }, { 6, 7 }, { 7, 8 }, { 5, 9 }, { 9, 10 },
-        { 10, 11 }, { 11, 12 }, { 9, 13 }, { 13, 14 }, { 14, 15 },
-        { 15, 16 }, { 13, 17 }, { 17, 18 }, { 18, 19 }, { 19, 20 },
-        { 0, 17 }, { 5, 17 }
-    };
-
     juce::Rectangle<float> getSceneBounds() const
     {
         auto available = getLocalBounds().toFloat().reduced(18.0f, 10.0f);
-        constexpr float aspect = 4.0f / 3.0f;
+        constexpr float aspect = 16.0f / 9.0f;
 
         auto width = available.getWidth();
         auto height = width / aspect;
@@ -334,10 +329,13 @@ private:
 
     juce::Colour getHandColour(int handIndex, float alpha) const
     {
-        const auto hue = handIndex == 0 ? 0.53f : 0.30f;
-        const auto saturation = juce::jmap(modulationEnergy, 0.35f, 0.9f);
-        const auto brightness = juce::jmap(1.0f - reverseAmount, 0.78f, 1.0f);
-        return juce::Colour::fromHSV(hue, saturation, brightness, alpha);
+        const auto tint = juce::jlimit(0.0f, 1.0f, modulationEnergy * 0.35f + reverseAmount * 0.15f);
+        const auto base = handIndex == 0
+            ? juce::Colour::fromRGB(24, 132, 46)
+            : juce::Colour::fromRGB(18, 120, 40);
+
+        return base.interpolatedWith(juce::Colour::fromRGB(72, 230, 88), 0.08f + tint * 0.12f)
+                   .withAlpha(alpha);
     }
 
     juce::Colour getParameterColour(const juce::String& parameter) const
@@ -357,73 +355,383 @@ private:
                   int handIndex,
                   const VisualHand& hand) const
     {
-        const auto baseColour = getHandColour(handIndex, 0.95f * hand.visibility);
-        const auto palmColour = baseColour.withAlpha(0.10f * hand.visibility);
+        auto mapped = mapHand(scene, hand);
+        shortenFinger(mapped, std::array<int, 4>{ 1, 2, 3, 4 }, 0.900f);
+        shortenFinger(mapped, std::array<int, 4>{ 5, 6, 7, 8 }, 0.900f);
+        shortenFinger(mapped, std::array<int, 4>{ 9, 10, 11, 12 }, 0.905f);
+        shortenFinger(mapped, std::array<int, 4>{ 13, 14, 15, 16 }, 0.900f);
+        shortenFinger(mapped, std::array<int, 4>{ 17, 18, 19, 20 }, 0.885f);
+        applyPinchClosure(mapped);
 
-        juce::Path palm;
-        palm.startNewSubPath(mapPoint(scene, hand.smoothed[0]));
-        palm.lineTo(mapPoint(scene, hand.smoothed[5]));
-        palm.lineTo(mapPoint(scene, hand.smoothed[9]));
-        palm.lineTo(mapPoint(scene, hand.smoothed[13]));
-        palm.lineTo(mapPoint(scene, hand.smoothed[17]));
-        palm.closeSubPath();
+        const auto baseColour = getHandColour(handIndex, 0.98f * hand.visibility);
+        const auto shadowColour = juce::Colour::fromRGB(0, 0, 0).withAlpha(0.44f * hand.visibility);
+        const auto outlineColour = juce::Colour::fromRGB(108, 255, 72).withAlpha(0.95f * hand.visibility);
+        const auto highlightColour = juce::Colour::fromRGB(220, 255, 176).withAlpha(0.30f * hand.visibility);
 
-        g.setColour(palmColour);
-        g.fillPath(palm);
+        drawPalmVolume(g, mapped, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
 
-        for (const auto& connection : handConnections)
-        {
-            const auto start = mapPoint(scene, hand.smoothed[(size_t) connection[0]]);
-            const auto end = mapPoint(scene, hand.smoothed[(size_t) connection[1]]);
-            const auto distance = start.getDistanceFrom(end);
-            const auto thickness = juce::jmap(distance, 10.0f, 140.0f, 7.0f, 14.0f) * hand.visibility;
+        drawFingerVolume(g, mapped, std::array<int, 4>{ 1, 2, 3, 4 }, handIndex == 0, 20.5f, 16.8f, 13.0f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
+        drawFingerVolume(g, mapped, std::array<int, 4>{ 5, 6, 7, 8 }, false,         22.2f, 18.4f, 13.8f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
+        drawFingerVolume(g, mapped, std::array<int, 4>{ 9, 10, 11, 12 }, false,      24.0f, 19.4f, 14.6f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
+        drawFingerVolume(g, mapped, std::array<int, 4>{ 13, 14, 15, 16 }, false,     22.0f, 17.6f, 13.2f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
+        drawFingerVolume(g, mapped, std::array<int, 4>{ 17, 18, 19, 20 }, false,     18.4f, 14.8f, 11.0f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
 
-            g.setColour(baseColour.withAlpha(0.10f * hand.visibility));
-            g.drawLine({ start, end }, thickness + 8.0f);
-
-            g.setColour(baseColour.withAlpha(0.55f * hand.visibility));
-            g.drawLine({ start, end }, thickness);
-
-            g.setColour(juce::Colours::white.withAlpha(0.22f * hand.visibility));
-            g.drawLine({ start, end }, juce::jmax(1.0f, thickness * 0.18f));
-        }
-
-        for (size_t pointIndex = 0; pointIndex < hand.smoothed.size(); ++pointIndex)
-        {
-            const auto mapped = mapPoint(scene, hand.smoothed[pointIndex]);
-            const bool isFingerTip = pointIndex == 4 || pointIndex == 8 || pointIndex == 12
-                                     || pointIndex == 16 || pointIndex == 20;
-            const auto radius = isFingerTip ? 7.0f : 4.2f;
-
-            juce::Colour pointColour = baseColour;
-
-            if (handIndex == 1)
-            {
-                const std::array<int, 4> synthTipIndices { 8, 12, 16, 20 };
-
-                for (size_t i = 0; i < synthTipIndices.size(); ++i)
-                {
-                    if ((int) pointIndex == synthTipIndices[i] && processor.fingerControls[i].isNotEmpty())
-                        pointColour = getParameterColour(processor.fingerControls[i]);
-                }
-            }
-
-            juce::ColourGradient pointGlow(
-                pointColour.withAlpha(isFingerTip ? 0.35f * hand.visibility : 0.22f * hand.visibility),
-                mapped.x, mapped.y,
-                juce::Colours::transparentBlack,
-                mapped.x + radius * 5.0f, mapped.y + radius * 5.0f,
-                true);
-
-            g.setGradientFill(pointGlow);
-            g.fillEllipse(mapped.x - radius * 2.5f, mapped.y - radius * 2.5f, radius * 5.0f, radius * 5.0f);
-
-            g.setColour(pointColour.withAlpha(0.95f * hand.visibility));
-            g.fillEllipse(mapped.x - radius, mapped.y - radius, radius * 2.0f, radius * 2.0f);
-        }
+        drawTextureLines(g, mapped, outlineColour, highlightColour, hand.visibility);
 
         if (handIndex == 1)
             drawAssignedParameterLabels(g, scene, hand);
+    }
+
+    std::array<juce::Point<float>, 21> mapHand(const juce::Rectangle<float>& scene,
+                                               const VisualHand& hand) const
+    {
+        std::array<juce::Point<float>, 21> mapped {};
+
+        for (size_t i = 0; i < mapped.size(); ++i)
+            mapped[i] = mapPoint(scene, hand.smoothed[i]);
+
+        return mapped;
+    }
+
+    juce::Point<float> pointAlong(juce::Point<float> a, juce::Point<float> b, float amount) const
+    {
+        return { juce::jmap(amount, a.x, b.x), juce::jmap(amount, a.y, b.y) };
+    }
+
+    void shortenFinger(std::array<juce::Point<float>, 21>& points,
+                       std::array<int, 4> indices,
+                       float scale) const
+    {
+        const auto base = points[(size_t) indices[0]];
+
+        for (size_t i = 1; i < indices.size(); ++i)
+            points[(size_t) indices[i]] = pointAlong(base, points[(size_t) indices[i]], scale);
+    }
+
+    void applyPinchClosure(std::array<juce::Point<float>, 21>& points) const
+    {
+        const std::array<int, 4> otherTips { 8, 12, 16, 20 };
+        const std::array<int, 4> otherNearTips { 7, 11, 15, 19 };
+        const std::array<int, 4> otherBaseJoints { 6, 10, 14, 18 };
+        constexpr float threshold = 54.0f;
+
+        for (size_t i = 0; i < otherTips.size(); ++i)
+        {
+            const auto thumbTip = points[4];
+            const auto otherTip = points[(size_t) otherTips[i]];
+            const auto distance = thumbTip.getDistanceFrom(otherTip);
+
+            if (distance >= threshold)
+                continue;
+
+            const auto t = juce::jlimit(0.0f, 1.0f, 1.0f - (distance / threshold));
+            const bool isPinky = i == 3;
+
+            const auto pinchMid = isPinky
+                ? pointAlong(otherTip, thumbTip, 0.78f)
+                : pointAlong(thumbTip, otherTip, 0.5f);
+            const auto thumbTarget = isPinky
+                ? pointAlong(thumbTip, otherTip, 0.28f)
+                : pinchMid;
+            const auto otherTarget = isPinky
+                ? pointAlong(otherTip, thumbTip, 0.82f)
+                : pinchMid;
+
+            const float thumbTipPull = isPinky ? 0.20f : 0.34f;
+            const float otherTipPull = isPinky ? 0.58f : 0.34f;
+            const float thumbJointPull = isPinky ? 0.05f : 0.12f;
+            const float otherNearPull = isPinky ? 0.02f : 0.10f;
+            const float otherBasePull = 0.0f;
+
+            points[4] = pointAlong(thumbTip, thumbTarget, thumbTipPull * t);
+            points[(size_t) otherTips[i]] = pointAlong(otherTip, otherTarget, otherTipPull * t);
+
+            points[3] = pointAlong(points[3], pinchMid, thumbJointPull * t);
+            points[(size_t) otherNearTips[i]] = pointAlong(points[(size_t) otherNearTips[i]], pinchMid, otherNearPull * t);
+            points[(size_t) otherBaseJoints[i]] = pointAlong(points[(size_t) otherBaseJoints[i]], pinchMid, otherBasePull * t);
+        }
+    }
+
+    juce::Point<float> perpendicular(juce::Point<float> from, juce::Point<float> to) const
+    {
+        auto delta = to - from;
+        const auto length = juce::jmax(1.0f, std::sqrt(delta.x * delta.x + delta.y * delta.y));
+        delta /= length;
+        return { -delta.y, delta.x };
+    }
+
+    juce::Path makeSmoothPath(const std::vector<juce::Point<float>>& points, bool closed) const
+    {
+        juce::Path path;
+
+        if (points.empty())
+            return path;
+
+        path.startNewSubPath(points.front());
+
+        if (points.size() == 1)
+            return path;
+
+        for (size_t i = 1; i < points.size() - 1; ++i)
+        {
+            const auto mid = pointAlong(points[i], points[i + 1], 0.5f);
+            path.quadraticTo(points[i], mid);
+        }
+
+        path.lineTo(points.back());
+
+        if (closed)
+            path.closeSubPath();
+
+        return path;
+    }
+
+    juce::Path createPalmFillPath(const std::array<juce::Point<float>, 21>& points) const
+    {
+        const auto wristLeft = points[0] + perpendicular(points[0], points[17]) * 20.0f;
+        const auto wristRight = points[0] - perpendicular(points[0], points[5]) * 20.0f;
+        const auto wristBottom = pointAlong(wristLeft, wristRight, 0.5f) + juce::Point<float>(0.0f, 1.5f);
+
+        return makeSmoothPath({
+            wristLeft,
+            points[17], pointAlong(points[17], points[13], 0.42f), points[13], points[9], points[5],
+            wristRight,
+            wristBottom
+        }, true);
+    }
+
+    juce::Path createHandOutlinePath(const std::array<juce::Point<float>, 21>& points) const
+    {
+        const auto wristLeft = points[0] + perpendicular(points[0], points[17]) * 22.0f;
+        const auto wristRight = points[0] - perpendicular(points[0], points[5]) * 22.0f;
+        const auto wristBottom = pointAlong(wristLeft, wristRight, 0.5f) + juce::Point<float>(0.0f, 1.0f);
+
+        return makeSmoothPath({
+            wristLeft,
+            points[17], pointAlong(points[17], points[18], 0.40f), points[20],
+            pointAlong(points[19], points[18], 0.45f), points[17],
+            pointAlong(points[13], points[14], 0.35f), points[16],
+            pointAlong(points[15], points[14], 0.45f), points[13],
+            pointAlong(points[9], points[10], 0.35f), points[12],
+            pointAlong(points[11], points[10], 0.45f), points[9],
+            pointAlong(points[5], points[6], 0.35f), points[8],
+            pointAlong(points[7], points[6], 0.45f), points[5],
+            pointAlong(points[2], points[3], 0.35f), points[4],
+            pointAlong(points[3], points[2], 0.45f), points[1],
+            wristRight,
+            wristBottom
+        }, true);
+    }
+
+    void fillSoftStroke(juce::Graphics& g,
+                        juce::Point<float> start,
+                        juce::Point<float> end,
+                        float width,
+                        juce::Colour fill,
+                        juce::Colour shadow,
+                        juce::Colour outline,
+                        juce::Colour highlight) const
+    {
+        g.setColour(shadow);
+        g.drawLine({ start.translated(width * 0.06f, width * 0.10f), end.translated(width * 0.06f, width * 0.10f) }, width + 2.2f);
+
+        g.setColour(fill);
+        g.drawLine({ start, end }, width);
+
+        g.setColour(outline);
+        g.drawLine({ start, end }, juce::jmax(1.0f, width * 0.10f));
+
+        const auto normal = perpendicular(start, end);
+        g.setColour(highlight);
+        g.drawLine({ start - normal * (width * 0.14f), end - normal * (width * 0.14f) }, juce::jmax(1.0f, width * 0.16f));
+    }
+
+    juce::Path createFingerShape(const std::array<juce::Point<float>, 21>& points,
+                                 std::array<int, 4> indices,
+                                 float width0,
+                                 float width1,
+                                 float width2) const
+    {
+        const std::array<float, 4> radii {
+            width0 * 0.50f,
+            width1 * 0.47f,
+            width2 * 0.43f,
+            width2 * 0.30f
+        };
+
+        std::vector<juce::Point<float>> leftSide;
+        std::vector<juce::Point<float>> rightSide;
+
+        for (size_t i = 0; i < indices.size(); ++i)
+        {
+            const auto current = points[(size_t) indices[i]];
+            const auto prevIndex = (i == 0) ? indices[0] : indices[i - 1];
+            const auto nextIndex = (i == indices.size() - 1) ? indices[i] : indices[i + 1];
+            const auto prev = points[(size_t) prevIndex];
+            const auto next = points[(size_t) nextIndex];
+            const auto normal = perpendicular(prev, next);
+
+            leftSide.push_back(current + normal * radii[i]);
+            rightSide.push_back(current - normal * radii[i]);
+        }
+
+        std::reverse(rightSide.begin(), rightSide.end());
+        leftSide.insert(leftSide.end(), rightSide.begin(), rightSide.end());
+
+        return makeSmoothPath(leftSide, true);
+    }
+
+    void fillFingerShape(juce::Graphics& g,
+                         const juce::Path& shape,
+                         juce::Colour fill,
+                         juce::Colour shadow,
+                         juce::Colour outline,
+                         juce::Colour highlight) const
+    {
+        const auto bounds = shape.getBounds();
+
+        juce::ColourGradient fingerGradient(
+            highlight.interpolatedWith(fill, 0.42f),
+            bounds.getX() + bounds.getWidth() * 0.20f, bounds.getY() + bounds.getHeight() * 0.08f,
+            shadow.interpolatedWith(fill, 0.14f),
+            bounds.getRight(), bounds.getBottom(),
+            false);
+
+        g.setColour(shadow.withAlpha(shadow.getFloatAlpha() * 0.42f));
+        g.fillPath(shape, juce::AffineTransform::translation(bounds.getWidth() * 0.025f, bounds.getHeight() * 0.035f));
+
+        g.setGradientFill(fingerGradient);
+        g.fillPath(shape);
+
+        g.setColour(outline.withAlpha(0.78f));
+        g.strokePath(shape, juce::PathStrokeType(1.7f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
+
+    void drawPalmVolume(juce::Graphics& g,
+                        const std::array<juce::Point<float>, 21>& points,
+                        juce::Colour fill,
+                        juce::Colour shadow,
+                        juce::Colour outline,
+                        juce::Colour highlight,
+                        float visibility) const
+    {
+        juce::ignoreUnused(visibility);
+
+        const auto palmPath = createPalmFillPath(points);
+        const auto outlinePath = createHandOutlinePath(points);
+        const auto bounds = palmPath.getBounds();
+
+        juce::ColourGradient palmGradient(
+            highlight.interpolatedWith(fill, 0.38f),
+            bounds.getX() + bounds.getWidth() * 0.18f, bounds.getY() + bounds.getHeight() * 0.08f,
+            shadow.interpolatedWith(fill, 0.12f),
+            bounds.getRight(), bounds.getBottom(),
+            false);
+
+        g.setGradientFill(palmGradient);
+        g.fillPath(palmPath);
+
+        g.setColour(outline.withAlpha(0.82f));
+        g.strokePath(outlinePath, juce::PathStrokeType(2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+        g.setColour(highlight.withAlpha(0.16f));
+        g.strokePath(makeSmoothPath({
+            pointAlong(points[5], points[9], 0.35f),
+            pointAlong(points[5], points[9], 0.85f),
+            pointAlong(points[9], points[13], 0.55f)
+        }, false), juce::PathStrokeType(2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
+
+    void drawFingerVolume(juce::Graphics& g,
+                          const std::array<juce::Point<float>, 21>& points,
+                          std::array<int, 4> indices,
+                          bool thumb,
+                          float width0,
+                          float width1,
+                          float width2,
+                          juce::Colour fill,
+                          juce::Colour shadow,
+                          juce::Colour outline,
+                          juce::Colour highlight,
+                          float visibility) const
+    {
+        juce::ignoreUnused(visibility);
+        const auto segmentFill = thumb
+            ? fill.interpolatedWith(juce::Colour::fromRGB(138, 245, 168), 0.07f)
+            : fill.interpolatedWith(juce::Colour::fromRGB(148, 255, 176), 0.10f);
+
+        const auto fingerShape = createFingerShape(points, indices, width0, width1, width2);
+        fillFingerShape(g, fingerShape, segmentFill, shadow, outline, highlight);
+
+        const std::array<float, 3> creaseWidths {
+            juce::jmax(1.0f, width0 * 0.07f),
+            juce::jmax(1.0f, width1 * 0.07f),
+            juce::jmax(1.0f, width2 * 0.07f)
+        };
+
+        for (size_t segment = 0; segment < 3; ++segment)
+        {
+            const auto start = points[(size_t) indices[segment]];
+            const auto end = points[(size_t) indices[segment + 1]];
+            const auto mid = pointAlong(start, end, 0.52f);
+            const auto normal = perpendicular(start, end);
+            const auto halfWidth = (segment == 0 ? width0 : (segment == 1 ? width1 : width2)) * 0.28f;
+
+            g.setColour(outline.withAlpha(0.32f));
+            g.drawLine({ mid + normal * halfWidth, mid - normal * halfWidth }, creaseWidths[segment]);
+
+            g.setColour(highlight.withAlpha(0.10f));
+            g.drawLine({ mid + normal * (halfWidth * 0.55f), mid - normal * (halfWidth * 0.55f) }, 1.0f);
+        }
+    }
+
+    void drawTextureLines(juce::Graphics& g,
+                          const std::array<juce::Point<float>, 21>& points,
+                          juce::Colour lineColour,
+                          juce::Colour glowColour,
+                          float visibility) const
+    {
+        const auto drawLineSet = [&](const juce::Path& path, float lineWidth, float glowWidth)
+        {
+            g.setColour(glowColour.withAlpha(0.10f * visibility));
+            g.strokePath(path, juce::PathStrokeType(glowWidth, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+            g.setColour(lineColour.withAlpha(0.76f * visibility));
+            g.strokePath(path, juce::PathStrokeType(lineWidth, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        };
+
+        const std::array<std::array<int, 4>, 5> fingers {{
+            {{ 1, 2, 3, 4 }},
+            {{ 5, 6, 7, 8 }},
+            {{ 9, 10, 11, 12 }},
+            {{ 13, 14, 15, 16 }},
+            {{ 17, 18, 19, 20 }}
+        }};
+
+        for (const auto& finger : fingers)
+        {
+            drawLineSet(makeSmoothPath({
+                points[(size_t) finger[0]],
+                points[(size_t) finger[1]],
+                points[(size_t) finger[2]],
+                points[(size_t) finger[3]]
+            }, false), 0.95f, 3.0f);
+
+            for (size_t segment = 0; segment < 3; ++segment)
+            {
+                const auto start = points[(size_t) finger[segment]];
+                const auto end = points[(size_t) finger[segment + 1]];
+                const auto mid = pointAlong(start, end, 0.5f);
+                const auto normal = perpendicular(start, end);
+                const auto halfWidth = start.getDistanceFrom(end) * 0.17f;
+
+                drawLineSet(makeSmoothPath({
+                    mid + normal * halfWidth,
+                    mid - normal * halfWidth
+                }, false), 0.85f, 2.6f);
+            }
+        }
+
     }
 
     void drawAssignedParameterLabels(juce::Graphics& g,
@@ -703,13 +1011,8 @@ public:
     }
 
     void granulatorParametersTitle() {
-        granulatorTitle.setText("Granulator Parameters", juce::dontSendNotification);
-        granulatorTitle.setFont(juce::Font("Arial", 20.0f, juce::Font::bold));
-        granulatorTitle.setColour(juce::Label::textColourId, juce::Colours::limegreen.withBrightness(1.2f));
-        granulatorTitle.setJustificationType(juce::Justification::centredLeft);
-        auto* shadow = new juce::DropShadowEffect();
-        shadow->setShadowProperties(juce::DropShadow(juce::Colours::limegreen.withAlpha(0.4f), 4.0f, { 1, 1 }));
-        granulatorTitle.setComponentEffect(shadow);
+        granulatorTitle.setText({}, juce::dontSendNotification);
+        granulatorTitle.setVisible(false);
     }
 
     void paint(juce::Graphics& g) override
@@ -831,44 +1134,55 @@ public:
 
     void resized() override
     {
-        auto area = getLocalBounds().reduced(20, 10);
-        const int topY = area.getY() - 10;
-        stopButton.setBounds(40-15, topY-1.3, 30, 30);
-        startButton.setBounds(80-15, topY-1.3, 28, 30);
-        startCamera.setBounds(120-16, topY-1, 46.5f, 30);
-        stopCamera.setBounds(180-16, topY-1, 46.5f, 30);
-        loadSampleButton.setBounds(40-16, topY+50, 100, 30);
-        resetButton.setBounds(132, topY + 50, 80, 30);
-        area.removeFromTop(30);
-       
-        //single row for all buttons
-        auto buttonRow = area.removeFromTop(30);
-        auto lowerRow = area.removeFromBottom(50);
-        auto lowerRow2 = area.removeFromBottom(100);
-        buttonRow.removeFromLeft(500); // add left margin to push right
-       
-        buttonRow.removeFromLeft(5);
-        buttonRow.removeFromLeft(5);   
-        grainDensity.setBounds(lowerRow.removeFromLeft(50));
+        auto area = getLocalBounds();
+        
+        // 1. Controls at the top
+        auto topRow = area.removeFromTop(80).withTrimmedTop(40).withTrimmedLeft(40).withTrimmedRight(40);
+        
+        // Left side controls
+        auto leftControls = topRow.removeFromLeft(250);
+        
+        // Wrap them nicely close together
+        stopButton.setBounds(leftControls.removeFromLeft(35).withSizeKeepingCentre(30, 30));
+        leftControls.removeFromLeft(5);
+        startButton.setBounds(leftControls.removeFromLeft(35).withSizeKeepingCentre(28, 30));
+        leftControls.removeFromLeft(15); 
+        startCamera.setBounds(leftControls.removeFromLeft(50).withSizeKeepingCentre(46, 30));
+        leftControls.removeFromLeft(5);
+        stopCamera.setBounds(leftControls.removeFromLeft(50).withSizeKeepingCentre(46, 30));
 
-        //move and size of grainCutOff 
-        grainCutOff.setBounds(8, 406, 75, 75); 
-        //move and size of grainPitch 
-        grainPitch.setBounds(7, 560, 110, 110); 
-        //move and size of grainReverse(done)  
-        grainReverse.setBounds(80, 484.5, 110, 110); 
-        //move and size of grainPos 
-        grainPos.setBounds(158.5, 483.7, 110, 110);
-        //move and size of grainDur 
-        grainDur.setBounds(81.5, 411.7, 110, 110);
-        //move and size of grainDensity 
-        grainDensity.setBounds(168, 415, 110, 110);
-        //waveform
-        area.removeFromTop(20);
-        int waveformHeight = 140;
-        waveformArea = area.removeFromTop(waveformHeight);
-        granulatorTitle.setBounds(20, 350, 300, 30);  //Granulator title
-
+        // Right side controls
+        auto rightControls = topRow.removeFromRight(200);
+        loadSampleButton.setBounds(rightControls.removeFromLeft(100).withSizeKeepingCentre(100, 30));
+        rightControls.removeFromLeft(10);
+        resetButton.setBounds(rightControls.removeFromLeft(80).withSizeKeepingCentre(80, 30));
+        
+        // 2. Waveform
+        area.removeFromTop(10);
+        waveformArea = area.removeFromTop(110).withTrimmedLeft(40).withTrimmedRight(40);
+        
+        // 3. Granulator Parameters Grid
+        area.removeFromTop(10);
+        granulatorTitle.setBounds({});
+        auto gridArea = area.removeFromTop(120).withTrimmedLeft(40).withTrimmedRight(40);
+        
+        auto row1 = gridArea.removeFromTop(55);
+        gridArea.removeFromTop(10); // gap between rows
+        auto row2 = gridArea.removeFromTop(55);
+        
+        int boxWidth = (row1.getWidth() - 30) / 3;
+        
+        grainPos.setBounds(row1.removeFromLeft(boxWidth));
+        row1.removeFromLeft(15);
+        grainDur.setBounds(row1.removeFromLeft(boxWidth));
+        row1.removeFromLeft(15);
+        grainDensity.setBounds(row1.removeFromLeft(boxWidth));
+        
+        grainReverse.setBounds(row2.removeFromLeft(boxWidth));
+        row2.removeFromLeft(15);
+        grainPitch.setBounds(row2.removeFromLeft(boxWidth));
+        row2.removeFromLeft(15);
+        grainCutOff.setBounds(row2.removeFromLeft(boxWidth));
     }
 
     static juce::Image loadButtonImage(const juce::File& imageFile)
@@ -1095,7 +1409,6 @@ CMProjectAudioProcessorEditor::CMProjectAudioProcessorEditor(CMProjectAudioProce
     : AudioProcessorEditor(&p), audioProcessor(p), tooltipWindow(this, 300)
 {
     startingConfigurationGlobal(); //Function that handles the starting configuration
-    loadHandiImageFromPath(); //function that handles the upload of the hand image
     clearFingersSetUp(); //Function that handles ClearFingers setup
     setToolTipFunction(); //Function that handles all the toolTip functions for both Synth and Drum page
     midiOnClickSetUpFunction(); //Function that handles all the oneclick setup functions
@@ -1103,7 +1416,7 @@ CMProjectAudioProcessorEditor::CMProjectAudioProcessorEditor(CMProjectAudioProce
     setToolTipFunction(); //Function that handles all the toolTip functions for both Synth and Drum page
     addListenerToGLobal(); //function that sets all the addListeners
     fingersSetUp(); //Function that setUps the fingers
-    setSize(950, 750); //Total size of the plugin
+    setSize(800, 750); //Total size of the plugin matching the new portrait layout
     startTimerHz(60); //starting camerapython timer
 }
 
@@ -1122,8 +1435,6 @@ CMProjectAudioProcessorEditor::~CMProjectAudioProcessorEditor()
         middleButton.removeListener(this);
         ringButton.removeListener(this);
         pinkyButton.removeListener(this);
-        indexLeftButton.removeListener(this);
-        middleLeftButton.removeListener(this);
         clearLookAndFeelRecursively (this);
         
         delete synthPage;
@@ -1165,39 +1476,27 @@ void CMProjectAudioProcessorEditor::fingersSetUp() {
     addAndMakeVisible(indexButton); //Index Finger
     indexButton.addListener(this);
     indexButton.setZoomFactor(2.5f);
+    indexButton.setVisible(false);
     addAndMakeVisible(middleButton); //Middle Finger
     middleButton.addListener(this);
     middleButton.setZoomFactor(2.5f);
+    middleButton.setVisible(false);
     addAndMakeVisible(ringButton); //Ring Finger
     ringButton.addListener(this);
     ringButton.setZoomFactor(2.5f);
+    ringButton.setVisible(false);
     addAndMakeVisible(pinkyButton); //Pinky Finger
     pinkyButton.addListener(this);
     pinkyButton.setZoomFactor(2.5f);
+    pinkyButton.setVisible(false);
     addAndMakeVisible(statusDisplay); //Status Display
-    addAndMakeVisible(indexLeftButton); //IndexLeftFinger
-    indexLeftButton.addListener(this);
-    indexLeftButton.setZoomFactor(2.5f);
-    indexLeftButton.setVisible(false);     
-    addAndMakeVisible(middleLeftButton); //MIddleLeftFinger
-    middleLeftButton.addListener(this);
-    middleLeftButton.setZoomFactor(2.5f);
-    middleLeftButton.setVisible(false);    
-    addAndMakeVisible(indexRightButton); //IndexRightFinger
-    indexRightButton.addListener(this);
-    indexRightButton.setZoomFactor(2.5f);
-    indexRightButton.setVisible(false);
-    addAndMakeVisible(middleRightButton); //IndexRightFinger
-    middleRightButton.addListener(this);
-    middleRightButton.setZoomFactor(2.5f);
-    middleRightButton.setVisible(false);
-
-
+    statusDisplay.setVisible(false);
 }
 void CMProjectAudioProcessorEditor::clearFingersSetUp() {
     addAndMakeVisible(clearFingersButton);
     clearFingersButton.addListener(this);
     clearFingersButton.setLookAndFeel(&clearFingerButtonLookAndFeel);
+    clearFingersButton.setVisible(false);
 }
 void CMProjectAudioProcessorEditor::midiOnClickSetUpFunction() {
     //Midi on.click setup
@@ -1229,26 +1528,6 @@ void CMProjectAudioProcessorEditor::midiOnClickSetUpFunction() {
             synthPage->recordMidiButton.setEnabled(true);
         };
 }
-void CMProjectAudioProcessorEditor::loadHandiImageFromPath() {
-    //Load hand image from path
-    juce::File imageFile = getHandImageFile();
-    if (imageFile.existsAsFile())
-    {
-        juce::Image handImage = juce::ImageFileFormat::loadFrom(imageFile);
-        handOverlay.setImage(handImage.rescaled(handImage.getWidth() * 2,
-            handImage.getHeight() * 2,
-            juce::Graphics::highResamplingQuality),
-            juce::RectanglePlacement::centred);
-        handOverlay.setAlpha(0.18f);
-        addAndMakeVisible(handOverlay);
-        handOverlay.setInterceptsMouseClicks(false, false);
-    }
-    else
-    {
-        DBG("handimage.png not found at the specified path.");
-    }
-
-}
 void CMProjectAudioProcessorEditor::addListenerToGLobal() {
     synthPage->startCamera.addListener(this);
     synthPage->stopCamera.addListener(this);
@@ -1272,40 +1551,32 @@ void CMProjectAudioProcessorEditor::resized()
     if (background)
         background->setBounds(getLocalBounds());
 
-    if (handVisualizer)
-        handVisualizer->setBounds(55, 365, 820, 340);
-
     auto fullArea = getLocalBounds();
-
-    auto areas = getLocalBounds(); //the whole plugin window
-    juce::ignoreUnused(areas);
-
     synthPage->setBounds(fullArea);
 
-    handOverlay.setBounds(65, 380, 800, 350); //Hands dimension and displacement
+    juce::Rectangle<int> visualizerArea(40, 360, getWidth() - 80, getHeight() - 390);
+    if (handVisualizer)
+        handVisualizer->setBounds(visualizerArea);
+        
 
-    const auto imageX = 50;
-    const auto imageY = 395;
+    // Dynamic scaled mapping over the visualizer region
+    float scaleX = visualizerArea.getWidth() / 800.0f;
+    float scaleY = visualizerArea.getHeight() / 350.0f;
+    float imageX = visualizerArea.getX() - (15.0f * scaleX);
+    float imageY = visualizerArea.getY() + (15.0f * scaleY);
     const auto circleDiameter = 20;
 
     //Values of the dot to perfectly sit on the index finger
     const int dotX = imageX + 560 - circleDiameter / 2;
     const int dotY = imageY + 15 - circleDiameter / 2;
-    const int dotLeftX = imageX + 272 - circleDiameter / 2;
 
     indexButton.setBounds(dotX, dotY, circleDiameter, circleDiameter);
-    indexRightButton.setBounds(dotX, dotY, circleDiameter, circleDiameter);
-    indexLeftButton.setBounds(dotLeftX, dotY, circleDiameter, circleDiameter);
     //Values of the dot to perfectly sit on the middle finger
     const int midOffsetX = 511.8;
-    const int midLeftOff = 317;
     const int midOffsetY = 3.9;
     const int midX = imageX + midOffsetX - circleDiameter / 2;
-    const int midLx= imageX + midLeftOff - circleDiameter / 2;
     const int midY = imageY + midOffsetY - circleDiameter / 2;
     middleButton.setBounds(midX, midY, circleDiameter, circleDiameter);
-    middleRightButton.setBounds(midX, midY, circleDiameter, circleDiameter);
-    middleLeftButton.setBounds(midLx, midY, circleDiameter, circleDiameter);
     //Values of the dot to perfectly sit on the ring finger
     const int ringOffx = 468;
     const int ringOffy = 17;
@@ -1320,20 +1591,13 @@ void CMProjectAudioProcessorEditor::resized()
     const int pinkyY = imageY + pinkyOffy - circleDiameter / 2;
     pinkyButton.setBounds(pinkyX, pinkyY, circleDiameter, circleDiameter);
     
-    auto area = getLocalBounds();
-    auto boxW = 180;
-    auto boxH = 50;
-    int statusX = 2;     // horizontal offset from the left
-    int statusY = getHeight() - boxH - 2; // vertical offset from the bottom
-    statusDisplay.setBounds(statusX, statusY, boxW, boxH);
-    clearFingersButton.setBounds(statusX + 190, statusY + 10, 100, 30);
-    //plugin title
-    auto textWidth = pageTitleLabel.getFont().getStringWidth("HAND GRANULATOR");
-    int padding = 20;
-    int totalWidth = textWidth + padding;
+    statusDisplay.setBounds({});
+    clearFingersButton.setBounds({});
 
-    pageTitleLabel.setBounds(getWidth() / 2 - totalWidth / 2 + 5 , 5, totalWidth, 40);
-  
+    // Plugin title perfectly centered at top
+    auto textWidth = pageTitleLabel.getFont().getStringWidth("HAND GRANULATOR");
+    int totalWidth = textWidth + 20;
+    pageTitleLabel.setBounds(getWidth() / 2 - totalWidth / 2 , 5, totalWidth, 40);
 
 }
 void CMProjectAudioProcessorEditor::mouseWheelMove(const juce::MouseEvent& e,

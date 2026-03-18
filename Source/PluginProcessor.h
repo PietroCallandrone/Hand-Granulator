@@ -11,9 +11,6 @@
 #include <array>
 #include <vector>
 
-//==============================================================================
-/**
-*/
 class CMProjectAudioProcessor  : public juce::AudioProcessor,
                                  public juce::OSCReceiver::ListenerWithOSCAddress<juce::OSCReceiver::MessageLoopCallback>
 {
