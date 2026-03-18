@@ -84,11 +84,9 @@ class CMProjectAudioProcessorEditor : public juce::AudioProcessorEditor,
     private juce::Button::Listener, private juce::Timer, public juce::MouseListener
 {
 public:
-   // juce::String fingerControls[3] = { {}, {}, {} };
     CMProjectAudioProcessorEditor(CMProjectAudioProcessor&);
     ~CMProjectAudioProcessorEditor() override;
 
-    //void buttonClicked(juce::Button*) override;
     void paint(juce::Graphics&) override;
     void resized() override;
     void mouseWheelMove(const juce::MouseEvent& e,
@@ -101,15 +99,12 @@ public:
     void setToolTipFunction();
     void fingersSetUp();
     void pluginTitle();
-    void loadHandiImageFromPath();
     void midiOnClickSetUpFunction();
     void clearFingersSetUp();
     void startingConfigurationGlobal();
     void addListenerToGLobal();
     juce::TextButton clearFingersButton{ "Clear Fingers" };
-    //HDImageButton rowIcon[4];
-   // void sliderValueChanged(juce::Slider* s) override;
-  
+   
 private:
 
     class SynthPageComponent;
@@ -118,7 +113,6 @@ private:
     std::unique_ptr<GridBackgroundComponent> background;
     std::unique_ptr<HandVisualizerComponent> handVisualizer;
     CMProjectAudioProcessor& audioProcessor;
-    juce::ImageComponent handOverlay;
     SynthPageComponent* synthPage = nullptr;
     juce::TooltipWindow tooltipWindow{ this, 300 /* delay in ms */ }; //OnMousePointed
     void clearLookAndFeelRecursively(Component* component)
@@ -252,10 +246,6 @@ private:
     CircleButton middleButton;
     CircleButton ringButton;
     CircleButton pinkyButton;
-    CircleButton indexLeftButton;
-    CircleButton middleLeftButton;
-    CircleButton indexRightButton;
-    CircleButton middleRightButton;
     juce::ImageComponent indexGlow, middleGlow, ringGlow, pinkyGlow;
 
     // Draws and positions a projecting image for the selected parameter at a given location with optional rotation and size
