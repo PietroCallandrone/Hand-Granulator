@@ -776,14 +776,9 @@ private:
 };
 
 //borders of the plugin that light up periodically
-class GridBackgroundComponent : public juce::Component, private juce::Timer
+class GridBackgroundComponent : public juce::Component
 {
 public:
-    GridBackgroundComponent()
-    {
-        startTimerHz(30); //Smooth 30 FPS animation
-    }
-
     void paint(juce::Graphics& g) override
     {
         g.fillAll(juce::Colours::black); //Fill all black
@@ -793,7 +788,7 @@ public:
         float saturation = juce::jmap(glowValue, 0.0f, 1.0f, 0.1f, 1.0f);  //soft gray → full color
         float brightness = juce::jmap(glowValue, 0.0f, 1.0f, 0.05f, 1.0f); //dim → full bright
 
-        juce::Colour glow = juce::Colour::fromHSV(hue, saturation, brightness, 1.0f);
+        juce::Colour glow = juce::Colours::transparentBlack;
         g.setColour(glow); //Set the glow
         auto bounds = getLocalBounds().toFloat();
         float thickness = 4.0f; //thickness of the glow
@@ -807,7 +802,7 @@ public:
         g.fillRect(bounds.removeFromRight(thickness));
     }
 
-    void timerCallback() override
+    void timerCallback()
     {
         phase += 0.02f; //controls glow speed (lower = slower)
 
@@ -868,16 +863,59 @@ class HDImageButton : public juce::ImageButton
 {
 public:
     using juce::ImageButton::ImageButton;
+
+    static juce::Rectangle<int> getVisibleBounds(const juce::Image& image)
+    {
+        if (! image.isValid())
+            return {};
+
+        const auto width = image.getWidth();
+        const auto height = image.getHeight();
+        int minX = width;
+        int minY = height;
+        int maxX = -1;
+        int maxY = -1;
+
+        for (int y = 0; y < height; ++y)
+        {
+            for (int x = 0; x < width; ++x)
+            {
+                auto pixel = image.getPixelAt(x, y);
+
+                if (pixel.getAlpha() > 10)
+                {
+                    minX = juce::jmin(minX, x);
+                    minY = juce::jmin(minY, y);
+                    maxX = juce::jmax(maxX, x);
+                    maxY = juce::jmax(maxY, y);
+                }
+            }
+        }
+
+        if (maxX < minX || maxY < minY)
+            return { 0, 0, width, height };
+
+        return { minX, minY, maxX - minX + 1, maxY - minY + 1 };
+    }
+
     void paintButton(juce::Graphics& g, bool isMouseOver, bool isButtonDown) override
     {
         g.setImageResamplingQuality(juce::Graphics::highResamplingQuality);
         const auto image = getNormalImage();   //This is public
-        auto bounds = getLocalBounds();
-        g.drawImageWithin(image,
-            bounds.getX(), bounds.getY(),
-            bounds.getWidth(), bounds.getHeight(),
-            juce::RectanglePlacement::centred,
-            false);
+        auto bounds = getLocalBounds().toFloat().reduced(4.0f);
+        auto sourceBounds = getVisibleBounds(image);
+
+        if (! image.isValid() || sourceBounds.isEmpty() || bounds.isEmpty())
+            return;
+
+        auto fittedBounds = juce::RectanglePlacement(juce::RectanglePlacement::centred)
+                                .appliedTo(sourceBounds.toFloat(), bounds);
+
+        g.drawImage(image,
+                    fittedBounds.getX(), fittedBounds.getY(),
+                    fittedBounds.getWidth(), fittedBounds.getHeight(),
+                    (float) sourceBounds.getX(), (float) sourceBounds.getY(),
+                    (float) sourceBounds.getWidth(), (float) sourceBounds.getHeight());
     }
 };
 
