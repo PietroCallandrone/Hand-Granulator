@@ -1946,7 +1946,7 @@ juce::Colour CMProjectAudioProcessorEditor::getParameterAccentColour(const juce:
 {
     if (parameter == "GrainPos")     return juce::Colour::fromRGB(84, 240, 255);
     if (parameter == "GrainDur")     return juce::Colour::fromRGB(255, 192, 92);
-    if (parameter == "GrainDensity") return juce::Colour::fromRGB(108, 255, 140);
+    if (parameter == "GrainDensity") return juce::Colour::fromRGB(255, 96, 96);
     if (parameter == "GrainPitch")   return juce::Colour::fromRGB(255, 122, 214);
     if (parameter == "GrainCutOff")  return juce::Colour::fromRGB(120, 168, 255);
     if (parameter == "GrainReverse") return juce::Colour::fromRGB(244, 250, 255);
