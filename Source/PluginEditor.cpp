@@ -920,6 +920,7 @@ class CMProjectAudioProcessorEditor::SynthPageComponent : public juce::Component
 public:
     juce::TextButton startButton, stopButton, startCamera, stopCamera, loadSampleButton; //StartSynth, StopSynth, StartCamera, StopCamera
     juce::TextButton recordMidiButton{ "Record MIDI" }, stopMidiButton{ "Stop Recording" }, saveMidiButton{ "Save MIDI" }; //Midi buttons
+    juce::TextButton recordAudioButton{ "Rec" }, stopAudioButton{ "Stop" }, saveAudioButton{ "Save Take" }, dragAudioButton{ "Drag Take" };
     HDImageButton grainPos, grainDur, grainDensity, grainReverse, grainCutOff, grainPitch; //Hd images for granulator parameters
     juce::Image startImg, stopImg; //Start and Stop Images
     juce::Label granulatorTitle;
@@ -965,6 +966,10 @@ public:
         addAndMakeVisible(stopButton);
         addAndMakeVisible(startCamera);
         addAndMakeVisible(stopCamera);
+        addAndMakeVisible(recordAudioButton);
+        addAndMakeVisible(stopAudioButton);
+        addAndMakeVisible(saveAudioButton);
+        addAndMakeVisible(dragAudioButton);
         addAndMakeVisible(loadSampleButton);
         addAndMakeVisible(grainPos);
         addAndMakeVisible(grainDur);
@@ -1025,11 +1030,15 @@ public:
         loadSampleButton.setButtonText("Load Sample");
         loadSampleButton.setLookAndFeel(&loadButtonLookAndFeel);
         resetButton.setLookAndFeel(&loadButtonLookAndFeel);
+        saveAudioButton.setLookAndFeel(&loadButtonLookAndFeel);
+        dragAudioButton.setLookAndFeel(&loadButtonLookAndFeel);
         saveMidiButton.setLookAndFeel(&loadButtonLookAndFeel);
         stopCamera.setEnabled(false);  //only enable once camera is running
         stopButton.setEnabled(false);  //only enable once the sound is being played
         stopMidiButton.setEnabled(false);
         saveMidiButton.setEnabled(false);
+        recordAudioButton.setLookAndFeel(&recordMidiLookAndFeel);
+        stopAudioButton.setLookAndFeel(&stopMidiLookAndFeel);
         recordMidiButton.setLookAndFeel(&recordMidiLookAndFeel);
         stopMidiButton.setLookAndFeel(&stopMidiLookAndFeel);
         startButton.setButtonText("Start Synth");
@@ -1038,6 +1047,22 @@ public:
         stopButton.setLookAndFeel(&stopButtonLookAndFeel);
         startButton.setClickingTogglesState(false);
         stopButton.setClickingTogglesState(false);
+        recordAudioButton.setClickingTogglesState(false);
+        stopAudioButton.setClickingTogglesState(false);
+        refreshAudioCaptureButtons();
+    }
+
+    void refreshAudioCaptureButtons()
+    {
+        const bool isRecording = processor.isAudioRecordingActive();
+        const bool hasTake = processor.hasAudioRecording();
+
+        recordAudioButton.setEnabled(! isRecording);
+        recordAudioButton.setToggleState(isRecording, juce::dontSendNotification);
+        stopAudioButton.setEnabled(isRecording);
+        stopAudioButton.setToggleState(isRecording, juce::dontSendNotification);
+        saveAudioButton.setEnabled(! isRecording && hasTake);
+        dragAudioButton.setEnabled(! isRecording && hasTake);
     }
 
     void granulatorParametersTitle() {
@@ -1213,9 +1238,19 @@ public:
         stopCamera.setBounds(leftControls.removeFromLeft(scaled(50)).withSizeKeepingCentre(scaled(46), scaled(30)));
 
         auto rightControls = topRow.removeFromRight(scaled(200));
+        auto recordingControls = topRow.removeFromRight(scaled(250));
         loadSampleButton.setBounds(rightControls.removeFromLeft(scaled(100)).withSizeKeepingCentre(scaled(100), scaled(30)));
         rightControls.removeFromLeft(scaled(10));
         resetButton.setBounds(rightControls.removeFromLeft(scaled(80)).withSizeKeepingCentre(scaled(80), scaled(30)));
+
+        const int recordGap = scaled(8);
+        stopAudioButton.setBounds(recordingControls.removeFromLeft(scaled(32)).withSizeKeepingCentre(scaled(32), scaled(30)));
+        recordingControls.removeFromLeft(recordGap);
+        recordAudioButton.setBounds(recordingControls.removeFromLeft(scaled(32)).withSizeKeepingCentre(scaled(32), scaled(30)));
+        recordingControls.removeFromLeft(recordGap);
+        saveAudioButton.setBounds(recordingControls.removeFromLeft(scaled(82)).withSizeKeepingCentre(scaled(82), scaled(30)));
+        recordingControls.removeFromLeft(recordGap);
+        dragAudioButton.setBounds(recordingControls.removeFromLeft(scaled(82)).withSizeKeepingCentre(scaled(82), scaled(30)));
 
         area.removeFromTop(scaled(10));
         waveformArea = area.removeFromTop(scaled(110)).withTrimmedLeft(scaled(40)).withTrimmedRight(scaled(40));
@@ -1541,6 +1576,10 @@ void CMProjectAudioProcessorEditor::setToolTipFunction() {
     synthPage->startCamera.setTooltip("Start Camera");
     synthPage->loadSampleButton.setTooltip("Load your sample");
     synthPage->stopCamera.setTooltip("Stop Camera");
+    synthPage->recordAudioButton.setTooltip("Record the plugin output to a WAV take");
+    synthPage->stopAudioButton.setTooltip("Stop audio recording");
+    synthPage->saveAudioButton.setTooltip("Save the last recorded take as WAV");
+    synthPage->dragAudioButton.setTooltip("Drag the last recorded take into the DAW");
 
 }
 void CMProjectAudioProcessorEditor::pluginTitle() {
@@ -1579,6 +1618,81 @@ void CMProjectAudioProcessorEditor::clearFingersSetUp() {
     clearFingersButton.setVisible(false);
 }
 void CMProjectAudioProcessorEditor::midiOnClickSetUpFunction() {
+    synthPage->recordAudioButton.onClick = [this]()
+        {
+            if (audioProcessor.startAudioRecording())
+            {
+                synthPage->refreshAudioCaptureButtons();
+                statusDisplay.showMessage("Recording audio take");
+            }
+            else
+            {
+                statusDisplay.showMessage("Audio engine not ready");
+            }
+        };
+
+    synthPage->stopAudioButton.onClick = [this]()
+        {
+            audioProcessor.stopAudioRecording();
+            synthPage->refreshAudioCaptureButtons();
+            statusDisplay.showMessage(audioProcessor.hasAudioRecording() ? "Take ready" : "No take captured");
+        };
+
+    synthPage->saveAudioButton.onClick = [this]()
+        {
+            if (! audioProcessor.hasAudioRecording())
+            {
+                statusDisplay.showMessage("Record a take first");
+                return;
+            }
+
+            auto chooser = std::make_unique<juce::FileChooser>(
+                "Save recorded take",
+                juce::File::getSpecialLocation(juce::File::userDesktopDirectory).getChildFile("hand-granulator-take.wav"),
+                "*.wav");
+
+            chooser->launchAsync(juce::FileBrowserComponent::saveMode
+                                 | juce::FileBrowserComponent::canSelectFiles
+                                 | juce::FileBrowserComponent::warnAboutOverwriting,
+                                 [this, fc = chooser.get()](const juce::FileChooser&)
+                                 {
+                                     auto targetFile = fc->getResult();
+
+                                     if (targetFile == juce::File())
+                                         return;
+
+                                     if (! targetFile.hasFileExtension("wav"))
+                                         targetFile = targetFile.withFileExtension(".wav");
+
+                                     if (audioProcessor.saveAudioRecording(targetFile))
+                                         statusDisplay.showMessage("Take saved");
+                                     else
+                                         statusDisplay.showMessage("Save failed");
+
+                                     synthPage->refreshAudioCaptureButtons();
+                                 });
+
+            chooser.release();
+        };
+
+    synthPage->dragAudioButton.onClick = [this]()
+        {
+            const auto takeFile = audioProcessor.getLatestAudioRecordingFile();
+
+            if (! takeFile.existsAsFile())
+            {
+                statusDisplay.showMessage("Record a take first");
+                return;
+            }
+
+            const bool dragStarted = juce::DragAndDropContainer::performExternalDragDropOfFiles(
+                { takeFile.getFullPathName() },
+                false,
+                this);
+
+            statusDisplay.showMessage(dragStarted ? "Drag the WAV into the DAW" : "Host drag not supported");
+        };
+
     //Midi on.click setup
     synthPage->recordMidiButton.onClick = [this]()
         {
