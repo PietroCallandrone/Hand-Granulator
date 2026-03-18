@@ -282,11 +282,20 @@ public:
             drawHand(g, scene, (int) handIndex, hands[handIndex]);
         }
 
-        if (! hasVisibleHands)
+        if (! isPythonOn)
         {
             g.setColour(juce::Colours::white.withAlpha(0.35f));
             g.setFont(juce::Font { juce::FontOptions(16.0f) });
             g.drawFittedText("Start camera to render live hand visuals inside the plugin",
+                scene.reduced(24.0f).toNearestInt(),
+                juce::Justification::centredBottom,
+                2);
+        }
+        else if (! hasVisibleHands)
+        {
+            g.setColour(juce::Colours::white.withAlpha(0.28f));
+            g.setFont(juce::Font { juce::FontOptions(15.0f) });
+            g.drawFittedText("Camera active. Move your hand into frame.",
                 scene.reduced(24.0f).toNearestInt(),
                 juce::Justification::centredBottom,
                 2);
@@ -2051,7 +2060,7 @@ juce::Colour CMProjectAudioProcessorEditor::getParameterAccentColour(const juce:
 {
     if (parameter == "GrainPos")     return juce::Colour::fromRGB(84, 240, 255);
     if (parameter == "GrainDur")     return juce::Colour::fromRGB(255, 192, 92);
-    if (parameter == "GrainDensity") return juce::Colour::fromRGB(108, 255, 140);
+    if (parameter == "GrainDensity") return juce::Colour::fromRGB(255, 96, 96);
     if (parameter == "GrainPitch")   return juce::Colour::fromRGB(255, 122, 214);
     if (parameter == "GrainCutOff")  return juce::Colour::fromRGB(120, 168, 255);
     if (parameter == "GrainReverse") return juce::Colour::fromRGB(244, 250, 255);
