@@ -162,7 +162,12 @@ void CMProjectAudioProcessorEditor::assignGlowToFinger(const juce::String& param
         0, 0, original.getWidth(), original.getHeight());
 
     glowTarget.setImage(canvas, juce::RectanglePlacement::centred);
-    glowTarget.setBounds(position.getX(), position.getY(), targetWidth, targetHeight);
+    const auto scale = (float) getWidth() / 800.0f;
+    glowTarget.setBounds(juce::Rectangle<int>(
+        juce::roundToInt(position.getX() * scale),
+        juce::roundToInt(position.getY() * scale),
+        juce::roundToInt(targetWidth * scale),
+        juce::roundToInt(targetHeight * scale)));
     glowTarget.setVisible(true);
     addAndMakeVisible(glowTarget);
 
@@ -1028,19 +1033,32 @@ public:
         {
             juce::Graphics::ScopedSaveState waveformClipState(g);
 
+            constexpr float waveformCornerRadius = 8.0f;
+
             juce::Path clipPath;
-            clipPath.addRoundedRectangle(waveformArea.toFloat(), 8.0f);
+            clipPath.addRoundedRectangle(waveformArea.toFloat(), waveformCornerRadius);
             g.reduceClipRegion(clipPath);
 
-            juce::Colour dark = juce::Colour::fromRGB(20, 20, 20);
-            juce::Colour light = juce::Colour::fromRGB(40, 40, 40);
-            juce::ColourGradient bg(dark,
+            juce::Colour bgBottom = juce::Colour::fromRGBA(12, 18, 16, 230);
+            juce::Colour bgTop = juce::Colour::fromRGBA(62, 78, 74, 170);
+            juce::ColourGradient bg(bgBottom,
                 waveformArea.getX(), waveformArea.getBottom(),
-                light,
-                waveformArea.getX(), waveformArea.getY(),
+                bgTop,
+                waveformArea.getRight(), waveformArea.getY(),
                 false);
+            bg.addColour(0.45, juce::Colour::fromRGBA(150, 190, 178, 58));
             g.setGradientFill(bg);
             g.fillRect(waveformArea);
+
+            juce::ColourGradient innerTint(
+                juce::Colour::fromRGBA(255, 255, 255, 42),
+                waveformArea.getCentreX(), waveformArea.getY(),
+                juce::Colour::fromRGBA(170, 255, 220, 16),
+                waveformArea.getCentreX(), waveformArea.getBottom(),
+                false);
+            innerTint.addColour(0.5, juce::Colour::fromRGBA(255, 255, 255, 12));
+            g.setGradientFill(innerTint);
+            g.fillRect(waveformArea.reduced(1));
 
             if (thumbnail.getTotalLength() > 0.0)
             {
@@ -1060,16 +1078,33 @@ public:
                 }
 
 
-            auto glassRect = waveformArea.withHeight(waveformArea.getHeight() / 4);
+            auto glassRect = waveformArea.withHeight(waveformArea.getHeight() / 3);
             juce::ColourGradient glassGradient(
-                juce::Colours::white.withAlpha(0.2f),
+                juce::Colour::fromRGBA(255, 255, 255, 88),
                 glassRect.getX(), glassRect.getY(),
-                juce::Colours::transparentWhite,
+                juce::Colour::fromRGBA(255, 255, 255, 0),
                 glassRect.getX(), glassRect.getBottom(),
-                false
-            );
+                false);
+            glassGradient.addColour(0.35, juce::Colour::fromRGBA(255, 255, 255, 32));
             g.setGradientFill(glassGradient);
-            g.fillRect(glassRect);
+            g.fillRect(glassRect.reduced(1, 0));
+
+            juce::Path sheenPath;
+            auto sheenArea = waveformArea.toFloat().reduced(4.0f, 4.0f);
+            sheenPath.startNewSubPath(sheenArea.getX(), sheenArea.getY() + sheenArea.getHeight() * 0.18f);
+            sheenPath.quadraticTo(sheenArea.getCentreX(), sheenArea.getY() - 6.0f,
+                                  sheenArea.getRight(), sheenArea.getY() + sheenArea.getHeight() * 0.12f);
+            sheenPath.lineTo(sheenArea.getRight(), sheenArea.getY());
+            sheenPath.lineTo(sheenArea.getX(), sheenArea.getY());
+            sheenPath.closeSubPath();
+            g.setColour(juce::Colour::fromRGBA(255, 255, 255, 26));
+            g.fillPath(sheenPath);
+
+            g.setColour(juce::Colour::fromRGBA(255, 255, 255, 110));
+            g.drawRoundedRectangle(waveformArea.toFloat().reduced(0.75f), waveformCornerRadius, 1.0f);
+
+            g.setColour(juce::Colour::fromRGBA(255, 255, 255, 34));
+            g.drawRoundedRectangle(waveformArea.toFloat().reduced(2.0f), waveformCornerRadius - 1.25f, 1.0f);
         }
     }
 
@@ -1140,56 +1175,53 @@ public:
     void resized() override
     {
         auto area = getLocalBounds();
-        
-        // 1. Controls at the top
-        auto topRow = area.removeFromTop(80).withTrimmedTop(40).withTrimmedLeft(40).withTrimmedRight(40);
-        
-        // Left side controls
-        auto leftControls = topRow.removeFromLeft(250);
-        
-        // Wrap them nicely close together
-        stopButton.setBounds(leftControls.removeFromLeft(35).withSizeKeepingCentre(30, 30));
-        leftControls.removeFromLeft(5);
-        startButton.setBounds(leftControls.removeFromLeft(35).withSizeKeepingCentre(28, 30));
-        leftControls.removeFromLeft(15); 
-        startCamera.setBounds(leftControls.removeFromLeft(50).withSizeKeepingCentre(46, 30));
-        leftControls.removeFromLeft(5);
-        stopCamera.setBounds(leftControls.removeFromLeft(50).withSizeKeepingCentre(46, 30));
+        const auto scale = (float) getWidth() / 800.0f;
+        const auto scaled = [scale](int value) { return juce::roundToInt(value * scale); };
 
-        // Right side controls
-        auto rightControls = topRow.removeFromRight(200);
-        loadSampleButton.setBounds(rightControls.removeFromLeft(100).withSizeKeepingCentre(100, 30));
-        rightControls.removeFromLeft(10);
-        resetButton.setBounds(rightControls.removeFromLeft(80).withSizeKeepingCentre(80, 30));
-        
-        // 2. Waveform
-        area.removeFromTop(10);
-        waveformArea = area.removeFromTop(110).withTrimmedLeft(40).withTrimmedRight(40);
-        
-        // 3. Granulator Title
-        area.removeFromTop(10);
-        granulatorTitle.setBounds(area.removeFromTop(30).withTrimmedLeft(40).withTrimmedRight(40));
-        
-        // 4. Granulator Parameters Grid
-        area.removeFromTop(0);
-        auto gridArea = area.removeFromTop(120).withTrimmedLeft(40).withTrimmedRight(40);
-        
-        auto row1 = gridArea.removeFromTop(55);
-        gridArea.removeFromTop(10); // gap between rows
-        auto row2 = gridArea.removeFromTop(55);
-        
-        int boxWidth = (row1.getWidth() - 30) / 3;
-        
+        auto topRow = area.removeFromTop(scaled(80))
+                          .withTrimmedTop(scaled(40))
+                          .withTrimmedLeft(scaled(40))
+                          .withTrimmedRight(scaled(40));
+
+        auto leftControls = topRow.removeFromLeft(scaled(250));
+        stopButton.setBounds(leftControls.removeFromLeft(scaled(35)).withSizeKeepingCentre(scaled(30), scaled(30)));
+        leftControls.removeFromLeft(scaled(5));
+        startButton.setBounds(leftControls.removeFromLeft(scaled(35)).withSizeKeepingCentre(scaled(28), scaled(30)));
+        leftControls.removeFromLeft(scaled(15));
+        startCamera.setBounds(leftControls.removeFromLeft(scaled(50)).withSizeKeepingCentre(scaled(46), scaled(30)));
+        leftControls.removeFromLeft(scaled(5));
+        stopCamera.setBounds(leftControls.removeFromLeft(scaled(50)).withSizeKeepingCentre(scaled(46), scaled(30)));
+
+        auto rightControls = topRow.removeFromRight(scaled(200));
+        loadSampleButton.setBounds(rightControls.removeFromLeft(scaled(100)).withSizeKeepingCentre(scaled(100), scaled(30)));
+        rightControls.removeFromLeft(scaled(10));
+        resetButton.setBounds(rightControls.removeFromLeft(scaled(80)).withSizeKeepingCentre(scaled(80), scaled(30)));
+
+        area.removeFromTop(scaled(10));
+        waveformArea = area.removeFromTop(scaled(110)).withTrimmedLeft(scaled(40)).withTrimmedRight(scaled(40));
+
+        area.removeFromTop(scaled(10));
+        granulatorTitle.setFont(juce::Font("Arial", 20.0f * scale, juce::Font::bold));
+        granulatorTitle.setBounds(area.removeFromTop(scaled(30)).withTrimmedLeft(scaled(40)).withTrimmedRight(scaled(40)));
+
+        auto gridArea = area.removeFromTop(scaled(120)).withTrimmedLeft(scaled(40)).withTrimmedRight(scaled(40));
+        auto row1 = gridArea.removeFromTop(scaled(55));
+        gridArea.removeFromTop(scaled(10));
+        auto row2 = gridArea.removeFromTop(scaled(55));
+
+        const int gap = scaled(15);
+        const int boxWidth = (row1.getWidth() - (gap * 2)) / 3;
+
         grainPos.setBounds(row1.removeFromLeft(boxWidth));
-        row1.removeFromLeft(15);
+        row1.removeFromLeft(gap);
         grainDur.setBounds(row1.removeFromLeft(boxWidth));
-        row1.removeFromLeft(15);
+        row1.removeFromLeft(gap);
         grainDensity.setBounds(row1.removeFromLeft(boxWidth));
-        
+
         grainReverse.setBounds(row2.removeFromLeft(boxWidth));
-        row2.removeFromLeft(15);
+        row2.removeFromLeft(gap);
         grainPitch.setBounds(row2.removeFromLeft(boxWidth));
-        row2.removeFromLeft(15);
+        row2.removeFromLeft(gap);
         grainCutOff.setBounds(row2.removeFromLeft(boxWidth));
     }
 
@@ -1388,6 +1420,25 @@ CMProjectAudioProcessorEditor::CMProjectAudioProcessorEditor(CMProjectAudioProce
     setToolTipFunction(); //Function that handles all the toolTip functions for both Synth and Drum page
     addListenerToGLobal(); //function that sets all the addListeners
     fingersSetUp(); //Function that setUps the fingers
+    int maxWidth = 1600;
+    int maxHeight = 1500;
+    if (auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+    {
+        const auto userArea = display->userArea;
+        maxWidth = juce::jmax(800, userArea.getWidth());
+        maxHeight = juce::jmax(750, juce::roundToInt(maxWidth * (750.0 / 800.0)));
+
+        if (maxHeight > userArea.getHeight())
+        {
+            maxHeight = juce::jmax(750, userArea.getHeight());
+            maxWidth = juce::jmax(800, juce::roundToInt(maxHeight * (800.0 / 750.0)));
+        }
+    }
+
+    setResizable(true, true);
+    setResizeLimits(800, 750, maxWidth, maxHeight);
+    if (auto* constrainer = getConstrainer())
+        constrainer->setFixedAspectRatio(800.0 / 750.0);
     setSize(800, 750); //Total size of the plugin matching the new portrait layout
     startTimerHz(60); //starting camerapython timer
 }
@@ -1518,63 +1569,38 @@ void CMProjectAudioProcessorEditor::addListenerToGLobal() {
 void CMProjectAudioProcessorEditor::paint(juce::Graphics&) {}
 void CMProjectAudioProcessorEditor::resized()
 {
+    const auto scale = (float) getWidth() / 800.0f;
+    const auto scaled = [scale](int value) { return juce::roundToInt(value * scale); };
+
     if (background)
         background->setBounds(getLocalBounds());
 
     auto fullArea = getLocalBounds();
     synthPage->setBounds(fullArea);
 
-    juce::Rectangle<int> visualizerArea(40, 360, 720, 310); 
+    juce::Rectangle<int> visualizerArea(scaled(40), scaled(360), scaled(720), scaled(310));
     if (handVisualizer)
         handVisualizer->setBounds(visualizerArea);
-        
-    handOverlay.setBounds(visualizerArea);
 
-    // Dynamic scaled mapping over the visualizer region
-    float scaleX = visualizerArea.getWidth() / 800.0f;
-    float scaleY = visualizerArea.getHeight() / 350.0f;
-    float imageX = visualizerArea.getX() - (15.0f * scaleX);
-    float imageY = visualizerArea.getY() + (15.0f * scaleY);
-    const auto circleDiameter = 20;
+    const int circleDiameter = scaled(20);
+    indexButton.setBounds(scaled(550), scaled(335), circleDiameter, circleDiameter);
+    middleButton.setBounds(scaled(502), scaled(319), circleDiameter, circleDiameter);
+    ringButton.setBounds(scaled(458), scaled(338), circleDiameter, circleDiameter);
+    pinkyButton.setBounds(scaled(428), scaled(383), circleDiameter, circleDiameter);
 
-    //Values of the dot to perfectly sit on the index finger
-    const int dotX = imageX + 560 - circleDiameter / 2;
-    const int dotY = imageY + 15 - circleDiameter / 2;
+    if (indexGlow.isVisible())  indexGlow.setBounds(scaled(591), scaled(330), scaled(73), scaled(73));
+    if (middleGlow.isVisible()) middleGlow.setBounds(scaled(532), scaled(316), scaled(72), scaled(72));
+    if (ringGlow.isVisible())   ringGlow.setBounds(scaled(474), scaled(331), scaled(72), scaled(72));
+    if (pinkyGlow.isVisible())  pinkyGlow.setBounds(scaled(437), scaled(382), scaled(68), scaled(68));
 
-    indexButton.setBounds(dotX, dotY, circleDiameter, circleDiameter);
-    //Values of the dot to perfectly sit on the middle finger
-    const int midOffsetX = 511.8;
-    const int midOffsetY = 3.9;
-    const int midX = imageX + midOffsetX - circleDiameter / 2;
-    const int midY = imageY + midOffsetY - circleDiameter / 2;
-    middleButton.setBounds(midX, midY, circleDiameter, circleDiameter);
-    //Values of the dot to perfectly sit on the ring finger
-    const int ringOffx = 468;
-    const int ringOffy = 17;
-    const int ringX = imageX + ringOffx - circleDiameter / 2;
-    const int ringY = imageY + ringOffy - circleDiameter / 2;
-    ringButton.setBounds(ringX, ringY, circleDiameter, circleDiameter);
+    const int statusY = visualizerArea.getBottom() + scaled(15);
+    statusDisplay.setBounds(scaled(40), statusY, scaled(180), scaled(50));
+    clearFingersButton.setBounds(getWidth() / 2 - scaled(75), statusY + scaled(20), scaled(150), scaled(30));
 
-    //Values of the dot to perfectly sit on the pinky finger
-    const int pinkyOffx = 438;
-    const int pinkyOffy = 62;
-    const int pinkyX = imageX + pinkyOffx - circleDiameter / 2;
-    const int pinkyY = imageY + pinkyOffy - circleDiameter / 2;
-    pinkyButton.setBounds(pinkyX, pinkyY, circleDiameter, circleDiameter);
-    
-    auto area = getLocalBounds();
-    int statusY = visualizerArea.getBottom() + 15;
-    
-    // Position status display nicely bottom left
-    statusDisplay.setBounds(40, statusY, 180, 50);
-    
-    // Center the clear fingers button at the bottom
-    clearFingersButton.setBounds(getWidth() / 2 - 75, statusY + 20, 150, 30);
-
-    // Plugin title perfectly centered at top
+    pageTitleLabel.setFont(juce::Font("Verdana", 30.0f * scale, juce::Font::bold));
     auto textWidth = pageTitleLabel.getFont().getStringWidth("HAND GRANULATOR");
-    int totalWidth = textWidth + 20;
-    pageTitleLabel.setBounds(getWidth() / 2 - totalWidth / 2 , 5, totalWidth, 40);
+    const int totalWidth = textWidth + scaled(20);
+    pageTitleLabel.setBounds(getWidth() / 2 - totalWidth / 2, scaled(5), totalWidth, scaled(40));
 
 }
 void CMProjectAudioProcessorEditor::mouseWheelMove(const juce::MouseEvent& e,
