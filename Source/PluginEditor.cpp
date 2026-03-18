@@ -951,17 +951,17 @@ public:
 
     }
     void imagesSetup() {
-        juce::File grainPosFile = getIconFile("grainPos.png");
+        juce::File grainPosFile = getIconFile("grainPosButton.png");
         setupImageButton(grainPos, grainPosFile);
-        juce::File grainDurFile = getIconFile("grainDur.png");
+        juce::File grainDurFile = getIconFile("grainDurButton.png");
         setupImageButton(grainDur, grainDurFile);
-        juce::File grainDensityFile = getIconFile("grainDensity.png");
+        juce::File grainDensityFile = getIconFile("grainDensityButton.png");
         setupImageButton(grainDensity, grainDensityFile);
-        juce::File grainCutOffFile = getIconFile("grainCutOff.png");
+        juce::File grainCutOffFile = getIconFile("grainCutOffButton.png");
         setupImageButton(grainCutOff, grainCutOffFile);
-        juce::File grainPitchFile = getIconFile("grainPitch.png");
+        juce::File grainPitchFile = getIconFile("grainPitchButton.png");
         setupImageButton(grainPitch, grainPitchFile);
-        juce::File grainReverseFile = getIconFile("grainReverse.png");
+        juce::File grainReverseFile = getIconFile("grainReverseButton.png");
         setupImageButton(grainReverse, grainReverseFile);
     }
 
@@ -1016,13 +1016,8 @@ public:
     }
 
     void granulatorParametersTitle() {
-        granulatorTitle.setText("Granulator Parameters", juce::dontSendNotification);
-        granulatorTitle.setFont(juce::Font("Arial", 20.0f, juce::Font::bold));
-        granulatorTitle.setColour(juce::Label::textColourId, juce::Colours::limegreen.withBrightness(1.2f));
-        granulatorTitle.setJustificationType(juce::Justification::centred);
-        auto* shadow = new juce::DropShadowEffect();
-        shadow->setShadowProperties(juce::DropShadow(juce::Colours::limegreen.withAlpha(0.4f), 4.0f, { 1, 1 }));
-        granulatorTitle.setComponentEffect(shadow);
+        granulatorTitle.setText({}, juce::dontSendNotification);
+        granulatorTitle.setVisible(false);
     }
 
     void paint(juce::Graphics& g) override
@@ -1212,6 +1207,9 @@ public:
         const int gap = scaled(15);
         const int boxWidth = (row1.getWidth() - (gap * 2)) / 3;
 
+        
+        int boxWidth = (row1.getWidth() - 30) / 3;
+        
         grainPos.setBounds(row1.removeFromLeft(boxWidth));
         row1.removeFromLeft(gap);
         grainDur.setBounds(row1.removeFromLeft(boxWidth));
@@ -1225,6 +1223,36 @@ public:
         grainCutOff.setBounds(row2.removeFromLeft(boxWidth));
     }
 
+    static juce::Image loadButtonImage(const juce::File& imageFile)
+    {
+        if (imageFile.hasFileExtension(".svg"))
+        {
+            auto svg = juce::XmlDocument::parse(imageFile);
+
+            if (svg == nullptr)
+                return {};
+
+            auto drawable = juce::Drawable::createFromSVG(*svg);
+
+            if (drawable == nullptr)
+                return {};
+
+            auto bounds = drawable->getDrawableBounds();
+            auto width = juce::jmax(1, juce::roundToInt(bounds.getWidth()));
+            auto height = juce::jmax(1, juce::roundToInt(bounds.getHeight()));
+            juce::Image image(juce::Image::ARGB, width, height, true);
+            juce::Graphics g(image);
+
+            drawable->drawWithin(g,
+                                 juce::Rectangle<float>(0.0f, 0.0f, (float) width, (float) height),
+                                 juce::RectanglePlacement::centred,
+                                 1.0f);
+            return image;
+        }
+
+        return juce::ImageFileFormat::loadFrom(imageFile);
+    }
+
     void setupImageButton(juce::ImageButton& button, const juce::File& imageFile)
     {
         if (!imageFile.existsAsFile())
@@ -1232,7 +1260,13 @@ public:
             DBG("❌ Could not find image: " + imageFile.getFullPathName());
             return;
         }
-        juce::Image img = juce::ImageFileFormat::loadFrom(imageFile);
+        juce::Image img = loadButtonImage(imageFile);
+
+        if (!img.isValid())
+        {
+            DBG("Could not load image: " + imageFile.getFullPathName());
+            return;
+        }
 
         button.setImages(false, true, true,
             img, 1.0f, {},   // normal
@@ -1513,11 +1547,13 @@ void CMProjectAudioProcessorEditor::fingersSetUp() {
     pinkyButton.setZoomFactor(2.5f);
     pinkyButton.setVisible(false);
     addAndMakeVisible(statusDisplay); //Status Display
+    statusDisplay.setVisible(false);
 }
 void CMProjectAudioProcessorEditor::clearFingersSetUp() {
     addAndMakeVisible(clearFingersButton);
     clearFingersButton.addListener(this);
     clearFingersButton.setLookAndFeel(&clearFingerButtonLookAndFeel);
+    clearFingersButton.setVisible(false);
 }
 void CMProjectAudioProcessorEditor::midiOnClickSetUpFunction() {
     //Midi on.click setup
@@ -1575,27 +1611,48 @@ void CMProjectAudioProcessorEditor::resized()
     if (background)
         background->setBounds(getLocalBounds());
 
-    auto fullArea = getLocalBounds();
+    juce::Rectangle<int> visualizerArea(scaled(40), scaled(360), scaled(720), scaled(310));
     synthPage->setBounds(fullArea);
 
-    juce::Rectangle<int> visualizerArea(scaled(40), scaled(360), scaled(720), scaled(310));
+    juce::Rectangle<int> visualizerArea(40, 360, 720, 310); 
     if (handVisualizer)
         handVisualizer->setBounds(visualizerArea);
+        
 
-    const int circleDiameter = scaled(20);
-    indexButton.setBounds(scaled(550), scaled(335), circleDiameter, circleDiameter);
-    middleButton.setBounds(scaled(502), scaled(319), circleDiameter, circleDiameter);
-    ringButton.setBounds(scaled(458), scaled(338), circleDiameter, circleDiameter);
-    pinkyButton.setBounds(scaled(428), scaled(383), circleDiameter, circleDiameter);
+    // Dynamic scaled mapping over the visualizer region
+    float scaleX = visualizerArea.getWidth() / 800.0f;
+    float scaleY = visualizerArea.getHeight() / 350.0f;
+    float imageX = visualizerArea.getX() - (15.0f * scaleX);
+    float imageY = visualizerArea.getY() + (15.0f * scaleY);
+    const auto circleDiameter = 20;
 
-    if (indexGlow.isVisible())  indexGlow.setBounds(scaled(591), scaled(330), scaled(73), scaled(73));
-    if (middleGlow.isVisible()) middleGlow.setBounds(scaled(532), scaled(316), scaled(72), scaled(72));
-    if (ringGlow.isVisible())   ringGlow.setBounds(scaled(474), scaled(331), scaled(72), scaled(72));
-    if (pinkyGlow.isVisible())  pinkyGlow.setBounds(scaled(437), scaled(382), scaled(68), scaled(68));
+    //Values of the dot to perfectly sit on the index finger
+    const int dotX = imageX + 560 - circleDiameter / 2;
+    const int dotY = imageY + 15 - circleDiameter / 2;
 
-    const int statusY = visualizerArea.getBottom() + scaled(15);
-    statusDisplay.setBounds(scaled(40), statusY, scaled(180), scaled(50));
-    clearFingersButton.setBounds(getWidth() / 2 - scaled(75), statusY + scaled(20), scaled(150), scaled(30));
+    indexButton.setBounds(dotX, dotY, circleDiameter, circleDiameter);
+    //Values of the dot to perfectly sit on the middle finger
+    const int midOffsetX = 511.8;
+    const int midOffsetY = 3.9;
+    const int midX = imageX + midOffsetX - circleDiameter / 2;
+    const int midY = imageY + midOffsetY - circleDiameter / 2;
+    middleButton.setBounds(midX, midY, circleDiameter, circleDiameter);
+    //Values of the dot to perfectly sit on the ring finger
+    const int ringOffx = 468;
+    const int ringOffy = 17;
+    const int ringX = imageX + ringOffx - circleDiameter / 2;
+    const int ringY = imageY + ringOffy - circleDiameter / 2;
+    ringButton.setBounds(ringX, ringY, circleDiameter, circleDiameter);
+
+    //Values of the dot to perfectly sit on the pinky finger
+    const int pinkyOffx = 438;
+    const int pinkyOffy = 62;
+    const int pinkyX = imageX + pinkyOffx - circleDiameter / 2;
+    const int pinkyY = imageY + pinkyOffy - circleDiameter / 2;
+    pinkyButton.setBounds(pinkyX, pinkyY, circleDiameter, circleDiameter);
+    
+    statusDisplay.setBounds({});
+    clearFingersButton.setBounds({});
 
     pageTitleLabel.setFont(juce::Font("Verdana", 30.0f * scale, juce::Font::bold));
     auto textWidth = pageTitleLabel.getFont().getStringWidth("HAND GRANULATOR");
