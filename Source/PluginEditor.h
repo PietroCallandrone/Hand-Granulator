@@ -88,6 +88,7 @@ public:
     ~CMProjectAudioProcessorEditor() override;
 
     void paint(juce::Graphics&) override;
+    void paintOverChildren(juce::Graphics&) override;
     void resized() override;
     void mouseWheelMove(const juce::MouseEvent& e,
         const juce::MouseWheelDetails& wheel) override;
@@ -150,7 +151,7 @@ private:
         void setIconImage(const juce::Image& img)
         {
             icon = img;
-            hasIcon = true;
+            hasIcon = img.isValid();
             repaint();
         }
         void setZoomFactor(float newZoom) noexcept
@@ -170,6 +171,7 @@ private:
         {
             constexpr float outlineWidth = 2.0f;
             auto bounds = getLocalBounds().toFloat().reduced(outlineWidth * 0.5f);
+            const auto showPreview = previewActive || hasIcon;
 
             if (useSquareStyle)
             {
@@ -186,7 +188,7 @@ private:
             else
             {
                 juce::ColourGradient glow(
-                    juce::Colour::fromFloatRGBA(0.f, 1.f, 1.f, 0.5f),
+                    juce::Colour::fromFloatRGBA(0.f, 1.f, 1.f, dragHover ? 0.90f : (showPreview ? 0.62f : 0.0f)),
                     bounds.getCentreX(), bounds.getCentreY(),
                     juce::Colours::transparentWhite,
                     bounds.getRight(), bounds.getBottom(),
@@ -195,8 +197,11 @@ private:
                 g.setGradientFill(glow);
                 g.fillEllipse(bounds);
 
-                g.setColour(juce::Colours::white.withAlpha(0.7f));
-                g.drawEllipse(bounds, outlineWidth);
+                if (showPreview)
+                {
+                    g.setColour((dragHover ? juce::Colours::limegreen : juce::Colours::white).withAlpha(dragHover ? 0.95f : 0.78f));
+                    g.drawEllipse(bounds, dragHover ? 2.8f : outlineWidth);
+                }
             }
 
             if (hasIcon && icon.isValid())
@@ -222,6 +227,7 @@ private:
         }
         void clearIcon() noexcept
         {
+            icon = juce::Image();
             hasIcon = false;
             repaint();
         }
@@ -232,6 +238,20 @@ private:
                 hasIcon = true;
             repaint();
         }
+
+        void setPreviewActive(bool shouldShow) noexcept
+        {
+            previewActive = shouldShow;
+            repaint();
+        }
+
+        void setDragHover(bool shouldHover) noexcept
+        {
+            dragHover = shouldHover;
+            repaint();
+        }
+
+        bool hasAssignedIcon() const noexcept { return hasIcon; }
         //pointer cursor
         juce::MouseCursor getMouseCursor() override { return juce::MouseCursor::PointingHandCursor; }
     private:
@@ -239,6 +259,8 @@ private:
         bool hasIcon = false;
         float       zoomFactor = 5.0f;  // try 1.5–3.0 for a tighter crop
         bool useSquareStyle = false;
+        bool previewActive = false;
+        bool dragHover = false;
 
     };
 
@@ -255,6 +277,23 @@ private:
         float rotationDeg = 0.0f,
         int targetWidth = 120,
         int targetHeight = 120);
+    bool assignParameterToFinger(const juce::String& parameter,
+                                 const juce::Image& icon,
+                                 CircleButton& fingerButton);
+    void clearFingerAssignmentVisuals(int fingerIndex);
+    bool hasVisibleTrackedHands() const;
+    void updateFingerTargetVisibility();
+    void updateFingerDragHover(juce::Point<float> screenPosition);
+    void beginParameterDrag(const juce::String& parameter,
+                            const juce::Image& icon,
+                            juce::Point<float> screenPosition,
+                            juce::Point<float> dragOrigin);
+    void updateParameterDrag(juce::Point<float> screenPosition);
+    void finishParameterDrag(juce::Point<float> screenPosition);
+    CircleButton* getFingerButtonAtScreenPosition(juce::Point<float> screenPosition);
+    int getFingerIndex(const CircleButton& fingerButton) const noexcept;
+    juce::String getFingerName(const CircleButton& fingerButton) const;
+    juce::Colour getParameterAccentColour(const juce::String& parameter) const;
 
     //Class for the status display
     class StatusDisplay : public juce::Component,
@@ -338,6 +377,12 @@ private:
         juce::String message;
     };
     StatusDisplay statusDisplay;
+    bool isParameterDragActive = false;
+    juce::String draggedParameter;
+    juce::Image draggedParameterIcon;
+    juce::Point<float> dragStartPoint;
+    juce::Point<float> dragCurrentPoint;
+    CircleButton* hoveredFingerButton = nullptr;
 
  // ==================================================
  // look and feel functions for buttons visual effects!
@@ -477,7 +522,8 @@ private:
     {
         void drawButtonText(juce::Graphics& g, juce::TextButton& button, bool, bool) override
         {
-            auto bounds = button.getLocalBounds().toFloat().reduced(8.0f);
+            auto bounds = button.getLocalBounds().toFloat().reduced(button.getHeight() * 0.18f,
+                                                                    button.getHeight() * 0.22f);
 
             // Shrink triangle height to 60% and center it vertically
             float triangleHeight = bounds.getHeight() * 0.85f;
@@ -514,7 +560,8 @@ private:
     {
         void drawButtonText(juce::Graphics& g, juce::TextButton& button, bool, bool) override
         {
-            auto bounds = button.getLocalBounds().toFloat().reduced(8.0f);
+            auto bounds = button.getLocalBounds().toFloat().reduced(button.getHeight() * 0.18f,
+                                                                    button.getHeight() * 0.22f);
             g.setColour(juce::Colours::white.withAlpha(0.85f));
 
             float barWidth = bounds.getWidth() * 0.2f;
@@ -539,24 +586,29 @@ private:
     {
         void drawButtonText(juce::Graphics& g, juce::TextButton& button, bool, bool) override
         {
-            auto bounds = button.getLocalBounds().toFloat().reduced(8.0f);
+            auto bounds = button.getLocalBounds().toFloat().reduced(button.getHeight() * 0.18f,
+                                                                    button.getHeight() * 0.22f);
             g.setColour(juce::Colours::white.withAlpha(0.85f));
 
-            //Camera body on the left
-            juce::Rectangle<float> body(bounds.getX(), bounds.getCentreY() - 8.0f, 22.0f, 16.0f);
-            g.fillRoundedRectangle(body, 4.0f);
+            const float iconHeight = juce::jlimit(10.0f, bounds.getHeight(), bounds.getHeight() * 0.58f);
+            const float bodyWidth = iconHeight * 1.35f;
+            const float lensWidth = iconHeight * 0.48f;
+            const float taper = iconHeight * 0.22f;
+            const float iconWidth = bodyWidth + lensWidth;
+            const float iconX = bounds.getCentreX() - iconWidth * 0.5f;
+            const float iconY = bounds.getCentreY() - iconHeight * 0.5f;
 
-            //Corrected trapezoid: small side near rectangle, large side outside
+            juce::Rectangle<float> body(iconX, iconY, bodyWidth, iconHeight);
+            g.fillRoundedRectangle(body, iconHeight * 0.24f);
+
             juce::Path lens;
-            float lensHeight = 12.0f;
-            float taper = 4.0f;
-            float baseX = body.getRight();      //right of the camera body
-            float centerY = body.getCentreY();
+            const float baseX = body.getRight();
+            const float centerY = body.getCentreY();
 
-            lens.startNewSubPath(baseX, centerY - lensHeight / 2 + taper);     // top-left (narrow base)
-            lens.lineTo(baseX + 8.0f, centerY - lensHeight / 2);      // top-right
-            lens.lineTo(baseX + 8.0f, centerY + lensHeight / 2);     // bottom-right
-            lens.lineTo(baseX, centerY + lensHeight / 2 - taper);    // bottom-left
+            lens.startNewSubPath(baseX, centerY - iconHeight * 0.5f + taper);
+            lens.lineTo(baseX + lensWidth, centerY - iconHeight * 0.5f);
+            lens.lineTo(baseX + lensWidth, centerY + iconHeight * 0.5f);
+            lens.lineTo(baseX, centerY + iconHeight * 0.5f - taper);
             lens.closeSubPath();
             g.fillPath(lens);
         }
@@ -566,30 +618,37 @@ private:
     {
         void drawButtonText(juce::Graphics& g, juce::TextButton& button, bool, bool) override
         {
-            auto bounds = button.getLocalBounds().toFloat().reduced(8.0f);
+            auto bounds = button.getLocalBounds().toFloat().reduced(button.getHeight() * 0.18f,
+                                                                    button.getHeight() * 0.22f);
             g.setColour(juce::Colours::white.withAlpha(0.85f));
 
             // Camera body
-            juce::Rectangle<float> body(bounds.getX(), bounds.getCentreY() - 8.0f, 22.0f, 16.0f);
-            g.fillRoundedRectangle(body, 4.0f);
+            const float iconHeight = juce::jlimit(10.0f, bounds.getHeight(), bounds.getHeight() * 0.58f);
+            const float bodyWidth = iconHeight * 1.35f;
+            const float lensWidth = iconHeight * 0.48f;
+            const float taper = iconHeight * 0.22f;
+            const float iconWidth = bodyWidth + lensWidth;
+            const float iconX = bounds.getCentreX() - iconWidth * 0.5f;
+            const float iconY = bounds.getCentreY() - iconHeight * 0.5f;
+
+            juce::Rectangle<float> body(iconX, iconY, bodyWidth, iconHeight);
+            g.fillRoundedRectangle(body, iconHeight * 0.24f);
 
             // Lens (trapezoid, flipped horizontally)
             juce::Path lens;
-            float lensHeight = 12.0f;
-            float taper = 4.0f;
-            float baseX = body.getRight();
-            float centerY = body.getCentreY();
+            const float baseX = body.getRight();
+            const float centerY = body.getCentreY();
 
-            lens.startNewSubPath(baseX, centerY - lensHeight / 2 + taper);       // top-left (narrow base)
-            lens.lineTo(baseX + 8.0f, centerY - lensHeight / 2);                 // top-right
-            lens.lineTo(baseX + 8.0f, centerY + lensHeight / 2);                 // bottom-right
-            lens.lineTo(baseX, centerY + lensHeight / 2 - taper);               // bottom-left
+            lens.startNewSubPath(baseX, centerY - iconHeight * 0.5f + taper);
+            lens.lineTo(baseX + lensWidth, centerY - iconHeight * 0.5f);
+            lens.lineTo(baseX + lensWidth, centerY + iconHeight * 0.5f);
+            lens.lineTo(baseX, centerY + iconHeight * 0.5f - taper);
             lens.closeSubPath();
             g.fillPath(lens);
 
             // Oblique "disabled" line (white core + blackish border)
             juce::Path slash;
-            float lineWidth = 2.5f;
+            const float lineWidth = juce::jmax(1.4f, iconHeight * 0.16f);
             float borderWidth = 6.5f; // ⬅️ thicker border
 
             slash.startNewSubPath(bounds.getX() + 2.0f, bounds.getBottom() - 2.0f);
