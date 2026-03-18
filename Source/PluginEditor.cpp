@@ -282,11 +282,20 @@ public:
             drawHand(g, scene, (int) handIndex, hands[handIndex]);
         }
 
-        if (! hasVisibleHands)
+        if (! isPythonOn)
         {
             g.setColour(juce::Colours::white.withAlpha(0.35f));
             g.setFont(juce::Font { juce::FontOptions(16.0f) });
             g.drawFittedText("Start camera to render live hand visuals inside the plugin",
+                scene.reduced(24.0f).toNearestInt(),
+                juce::Justification::centredBottom,
+                2);
+        }
+        else if (! hasVisibleHands)
+        {
+            g.setColour(juce::Colours::white.withAlpha(0.28f));
+            g.setFont(juce::Font { juce::FontOptions(15.0f) });
+            g.drawFittedText("Camera active. Move your hand into frame.",
                 scene.reduced(24.0f).toNearestInt(),
                 juce::Justification::centredBottom,
                 2);
