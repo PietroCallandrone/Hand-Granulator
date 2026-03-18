@@ -1206,9 +1206,6 @@ public:
 
         const int gap = scaled(15);
         const int boxWidth = (row1.getWidth() - (gap * 2)) / 3;
-
-        
-        int boxWidth = (row1.getWidth() - 30) / 3;
         
         grainPos.setBounds(row1.removeFromLeft(boxWidth));
         row1.removeFromLeft(gap);
@@ -1611,48 +1608,28 @@ void CMProjectAudioProcessorEditor::resized()
     if (background)
         background->setBounds(getLocalBounds());
 
-    juce::Rectangle<int> visualizerArea(scaled(40), scaled(360), scaled(720), scaled(310));
+    auto fullArea = getLocalBounds();
     synthPage->setBounds(fullArea);
 
-    juce::Rectangle<int> visualizerArea(40, 360, 720, 310); 
+    juce::Rectangle<int> visualizerArea(scaled(40), scaled(360), scaled(720), scaled(310));
+
     if (handVisualizer)
         handVisualizer->setBounds(visualizerArea);
-        
 
-    // Dynamic scaled mapping over the visualizer region
-    float scaleX = visualizerArea.getWidth() / 800.0f;
-    float scaleY = visualizerArea.getHeight() / 350.0f;
-    float imageX = visualizerArea.getX() - (15.0f * scaleX);
-    float imageY = visualizerArea.getY() + (15.0f * scaleY);
-    const auto circleDiameter = 20;
+    const int circleDiameter = scaled(20);
+    indexButton.setBounds(scaled(550), scaled(335), circleDiameter, circleDiameter);
+    middleButton.setBounds(scaled(502), scaled(319), circleDiameter, circleDiameter);
+    ringButton.setBounds(scaled(458), scaled(338), circleDiameter, circleDiameter);
+    pinkyButton.setBounds(scaled(428), scaled(383), circleDiameter, circleDiameter);
 
-    //Values of the dot to perfectly sit on the index finger
-    const int dotX = imageX + 560 - circleDiameter / 2;
-    const int dotY = imageY + 15 - circleDiameter / 2;
+    if (indexGlow.isVisible())  indexGlow.setBounds(scaled(591), scaled(330), scaled(73), scaled(73));
+    if (middleGlow.isVisible()) middleGlow.setBounds(scaled(532), scaled(316), scaled(72), scaled(72));
+    if (ringGlow.isVisible())   ringGlow.setBounds(scaled(474), scaled(331), scaled(72), scaled(72));
+    if (pinkyGlow.isVisible())  pinkyGlow.setBounds(scaled(437), scaled(382), scaled(68), scaled(68));
 
-    indexButton.setBounds(dotX, dotY, circleDiameter, circleDiameter);
-    //Values of the dot to perfectly sit on the middle finger
-    const int midOffsetX = 511.8;
-    const int midOffsetY = 3.9;
-    const int midX = imageX + midOffsetX - circleDiameter / 2;
-    const int midY = imageY + midOffsetY - circleDiameter / 2;
-    middleButton.setBounds(midX, midY, circleDiameter, circleDiameter);
-    //Values of the dot to perfectly sit on the ring finger
-    const int ringOffx = 468;
-    const int ringOffy = 17;
-    const int ringX = imageX + ringOffx - circleDiameter / 2;
-    const int ringY = imageY + ringOffy - circleDiameter / 2;
-    ringButton.setBounds(ringX, ringY, circleDiameter, circleDiameter);
-
-    //Values of the dot to perfectly sit on the pinky finger
-    const int pinkyOffx = 438;
-    const int pinkyOffy = 62;
-    const int pinkyX = imageX + pinkyOffx - circleDiameter / 2;
-    const int pinkyY = imageY + pinkyOffy - circleDiameter / 2;
-    pinkyButton.setBounds(pinkyX, pinkyY, circleDiameter, circleDiameter);
-    
-    statusDisplay.setBounds({});
-    clearFingersButton.setBounds({});
+    const int statusY = visualizerArea.getBottom() + scaled(15);
+    statusDisplay.setBounds(scaled(40), statusY, scaled(180), scaled(50));
+    clearFingersButton.setBounds(getWidth() / 2 - scaled(75), statusY + scaled(20), scaled(150), scaled(30));
 
     pageTitleLabel.setFont(juce::Font("Verdana", 30.0f * scale, juce::Font::bold));
     auto textWidth = pageTitleLabel.getFont().getStringWidth("HAND GRANULATOR");
