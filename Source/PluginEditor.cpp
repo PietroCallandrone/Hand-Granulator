@@ -343,18 +343,6 @@ private:
                    .withAlpha(alpha);
     }
 
-    juce::Colour getParameterColour(const juce::String& parameter) const
-    {
-        if (parameter == "GrainPos")     return juce::Colour::fromRGB(84, 240, 255);
-        if (parameter == "GrainDur")     return juce::Colour::fromRGB(255, 192, 92);
-        if (parameter == "GrainDensity") return juce::Colour::fromRGB(108, 255, 140);
-        if (parameter == "GrainPitch")   return juce::Colour::fromRGB(255, 122, 214);
-        if (parameter == "GrainCutOff")  return juce::Colour::fromRGB(120, 168, 255);
-        if (parameter == "GrainReverse") return juce::Colour::fromRGB(244, 250, 255);
-        if (parameter == "lfoRate")      return juce::Colour::fromRGB(196, 134, 255);
-        return juce::Colours::white;
-    }
-
     void drawHand(juce::Graphics& g,
                   const juce::Rectangle<float>& scene,
                   int handIndex,
@@ -382,9 +370,6 @@ private:
         drawFingerVolume(g, mapped, std::array<int, 4>{ 17, 18, 19, 20 }, false,     18.4f, 14.8f, 11.0f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
 
         drawTextureLines(g, mapped, outlineColour, highlightColour, hand.visibility);
-
-        if (handIndex == 1)
-            drawAssignedParameterLabels(g, scene, hand);
     }
 
     std::array<juce::Point<float>, 21> mapHand(const juce::Rectangle<float>& scene,
@@ -737,40 +722,6 @@ private:
             }
         }
 
-    }
-
-    void drawAssignedParameterLabels(juce::Graphics& g,
-                                     const juce::Rectangle<float>& scene,
-                                     const VisualHand& hand) const
-    {
-        const std::array<int, 4> tipIndices { 8, 12, 16, 20 };
-
-        for (size_t i = 0; i < tipIndices.size(); ++i)
-        {
-            const auto& parameter = processor.fingerControls[i];
-
-            if (parameter.isEmpty())
-                continue;
-
-            const auto tip = mapPoint(scene, hand.smoothed[(size_t) tipIndices[i]]);
-            const auto labelArea = juce::Rectangle<float>(0.0f, 0.0f, 112.0f, 24.0f)
-                .withCentre({ tip.x + 64.0f, tip.y - 16.0f });
-
-            const auto labelColour = getParameterColour(parameter);
-
-            g.setColour(juce::Colours::black.withAlpha(0.35f * hand.visibility));
-            g.fillRoundedRectangle(labelArea.translated(0.0f, 2.0f), 12.0f);
-
-            g.setColour(labelColour.withAlpha(0.22f * hand.visibility));
-            g.fillRoundedRectangle(labelArea, 12.0f);
-
-            g.setColour(labelColour.withAlpha(0.75f * hand.visibility));
-            g.drawRoundedRectangle(labelArea, 12.0f, 1.0f);
-
-            g.setColour(juce::Colours::white.withAlpha(0.94f * hand.visibility));
-            g.setFont(juce::Font { juce::FontOptions(12.0f) }.boldened());
-            g.drawFittedText(parameter, labelArea.toNearestInt(), juce::Justification::centred, 1);
-        }
     }
 
     CMProjectAudioProcessor& processor;
@@ -1726,6 +1677,126 @@ void CMProjectAudioProcessorEditor::addListenerToGLobal() {
 void CMProjectAudioProcessorEditor::paint(juce::Graphics&) {}
 void CMProjectAudioProcessorEditor::paintOverChildren(juce::Graphics& g)
 {
+    const auto timeSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
+    const auto trackedHands = audioProcessor.getTrackedHands();
+    const auto* mappedHand = trackedHands[1].visible ? &trackedHands[1]
+                                                     : (trackedHands[0].visible ? &trackedHands[0] : nullptr);
+
+    const auto getParameterAnchor = [this](const juce::String& parameter) -> juce::Point<float>
+    {
+        auto getBottomAnchor = [this](juce::Component& component)
+        {
+            const auto bounds = getLocalArea(&component, component.getLocalBounds()).toFloat();
+            return juce::Point<float>(bounds.getCentreX(), bounds.getBottom() - 4.0f);
+        };
+
+        if (parameter == "GrainPos")     return getBottomAnchor(synthPage->grainPos);
+        if (parameter == "GrainDur")     return getBottomAnchor(synthPage->grainDur);
+        if (parameter == "GrainDensity") return getBottomAnchor(synthPage->grainDensity);
+        if (parameter == "GrainReverse") return getBottomAnchor(synthPage->grainReverse);
+        if (parameter == "GrainPitch")   return getBottomAnchor(synthPage->grainPitch);
+        if (parameter == "GrainCutOff")  return getBottomAnchor(synthPage->grainCutOff);
+
+        return {};
+    };
+
+    const auto getFallbackFingerAnchor = [this](const CircleButton& button)
+    {
+        return getLocalArea(&button, button.getLocalBounds()).toFloat().getCentre();
+    };
+
+    const auto getTrackedFingerAnchor = [this, mappedHand](int fingerIndex) -> juce::Point<float>
+    {
+        if (mappedHand == nullptr || handVisualizer == nullptr)
+            return {};
+
+        auto scene = getLocalArea(handVisualizer.get(), handVisualizer->getLocalBounds()).toFloat().reduced(18.0f, 10.0f);
+        constexpr float aspect = 16.0f / 9.0f;
+
+        auto width = scene.getWidth();
+        auto height = width / aspect;
+
+        if (height > scene.getHeight())
+        {
+            height = scene.getHeight();
+            width = height * aspect;
+        }
+
+        scene = {
+            scene.getCentreX() - width * 0.5f,
+            scene.getCentreY() - height * 0.5f,
+            width,
+            height
+        };
+
+        constexpr int tipIndices[] { 8, 12, 16, 20 };
+
+        if (! juce::isPositiveAndBelow(fingerIndex, 4))
+            return {};
+
+        const auto point = mappedHand->landmarks[(size_t) tipIndices[fingerIndex]];
+        return {
+            scene.getX() + point.x * scene.getWidth(),
+            scene.getY() + point.y * scene.getHeight()
+        };
+    };
+
+    const auto drawPersistentMapping = [this, &g, timeSeconds, &getParameterAnchor, &getFallbackFingerAnchor, &getTrackedFingerAnchor, mappedHand](int fingerIndex, CircleButton& button)
+    {
+        const auto& parameter = audioProcessor.fingerControls[fingerIndex];
+
+        if (parameter.isEmpty())
+            return;
+
+        const auto start = getParameterAnchor(parameter);
+        const auto accent = getParameterAccentColour(parameter);
+        const auto end = mappedHand != nullptr ? getTrackedFingerAnchor(fingerIndex)
+                                               : getFallbackFingerAnchor(button);
+
+        if (start == juce::Point<float>() || end == juce::Point<float>())
+            return;
+
+        const auto verticalSpan = juce::jmax(42.0f, (end.y - start.y) * 0.42f);
+        const float pulse = 0.68f + 0.32f * static_cast<float>(std::sin(timeSeconds * 4.6 + fingerIndex * 0.55));
+
+        juce::Path cable;
+        cable.startNewSubPath(start);
+        cable.cubicTo(start.x, start.y + verticalSpan,
+                      end.x, end.y - juce::jmax(28.0f, verticalSpan * 0.52f),
+                      end.x, end.y);
+
+        g.setColour(juce::Colours::black.withAlpha(0.28f));
+        g.strokePath(cable, juce::PathStrokeType(8.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+        g.setColour(accent.withAlpha(0.16f * pulse));
+        g.strokePath(cable, juce::PathStrokeType(6.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+        g.setColour(accent.withAlpha(0.82f));
+        g.strokePath(cable, juce::PathStrokeType(2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+        g.setColour(accent.withAlpha(0.94f));
+        g.fillEllipse(juce::Rectangle<float>(0.0f, 0.0f, 7.0f, 7.0f).withCentre(start));
+
+        if (mappedHand != nullptr)
+        {
+            auto halo = juce::Rectangle<float>(0.0f, 0.0f, 22.0f, 22.0f).withCentre(end);
+            auto ring = juce::Rectangle<float>(0.0f, 0.0f, 13.0f, 13.0f).withCentre(end);
+            auto core = juce::Rectangle<float>(0.0f, 0.0f, 6.0f, 6.0f).withCentre(end);
+
+            g.setColour(accent.withAlpha(0.14f * pulse));
+            g.fillEllipse(halo);
+            g.setColour(accent.withAlpha(0.94f));
+            g.drawEllipse(ring, 1.8f);
+            g.setColour(juce::Colours::white.withAlpha(0.96f));
+            g.fillEllipse(core);
+        }
+    };
+
+    drawPersistentMapping(0, indexButton);
+    drawPersistentMapping(1, middleButton);
+    drawPersistentMapping(2, ringButton);
+    drawPersistentMapping(3, pinkyButton);
+
     if (! isParameterDragActive || draggedParameter.isEmpty())
         return;
 
