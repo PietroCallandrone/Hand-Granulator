@@ -1,6 +1,8 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include <JuceHeader.h>
+#include <cmath>
+#include <vector>
 
 #if JUCE_MAC
  #include <dlfcn.h>
@@ -294,14 +296,6 @@ private:
         std::array<juce::Point<float>, 21> smoothed {};
     };
 
-    static constexpr int handConnections[][2] = {
-        { 0, 1 }, { 1, 2 }, { 2, 3 }, { 3, 4 }, { 0, 5 },
-        { 5, 6 }, { 6, 7 }, { 7, 8 }, { 5, 9 }, { 9, 10 },
-        { 10, 11 }, { 11, 12 }, { 9, 13 }, { 13, 14 }, { 14, 15 },
-        { 15, 16 }, { 13, 17 }, { 17, 18 }, { 18, 19 }, { 19, 20 },
-        { 0, 17 }, { 5, 17 }
-    };
-
     juce::Rectangle<float> getSceneBounds() const
     {
         auto available = getLocalBounds().toFloat().reduced(18.0f, 10.0f);
@@ -334,10 +328,13 @@ private:
 
     juce::Colour getHandColour(int handIndex, float alpha) const
     {
-        const auto hue = handIndex == 0 ? 0.53f : 0.30f;
-        const auto saturation = juce::jmap(modulationEnergy, 0.35f, 0.9f);
-        const auto brightness = juce::jmap(1.0f - reverseAmount, 0.78f, 1.0f);
-        return juce::Colour::fromHSV(hue, saturation, brightness, alpha);
+        const auto tint = juce::jlimit(0.0f, 1.0f, modulationEnergy * 0.35f + reverseAmount * 0.15f);
+        const auto base = handIndex == 0
+            ? juce::Colour::fromRGB(62, 255, 110)
+            : juce::Colour::fromRGB(48, 235, 96);
+
+        return base.interpolatedWith(juce::Colour::fromRGB(130, 255, 170), 0.10f + tint * 0.16f)
+                   .withAlpha(alpha);
     }
 
     juce::Colour getParameterColour(const juce::String& parameter) const
@@ -357,73 +354,225 @@ private:
                   int handIndex,
                   const VisualHand& hand) const
     {
-        const auto baseColour = getHandColour(handIndex, 0.95f * hand.visibility);
-        const auto palmColour = baseColour.withAlpha(0.10f * hand.visibility);
+        const auto mapped = mapHand(scene, hand);
+        const auto baseColour = getHandColour(handIndex, 0.98f * hand.visibility);
+        const auto shadowColour = juce::Colour::fromRGB(0, 0, 0).withAlpha(0.42f * hand.visibility);
+        const auto outlineColour = juce::Colour::fromRGB(8, 46, 18).withAlpha(0.92f * hand.visibility);
+        const auto highlightColour = juce::Colour::fromRGB(196, 255, 210).withAlpha(0.34f * hand.visibility);
 
-        juce::Path palm;
-        palm.startNewSubPath(mapPoint(scene, hand.smoothed[0]));
-        palm.lineTo(mapPoint(scene, hand.smoothed[5]));
-        palm.lineTo(mapPoint(scene, hand.smoothed[9]));
-        palm.lineTo(mapPoint(scene, hand.smoothed[13]));
-        palm.lineTo(mapPoint(scene, hand.smoothed[17]));
-        palm.closeSubPath();
+        drawPalmVolume(g, mapped, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
 
-        g.setColour(palmColour);
-        g.fillPath(palm);
+        drawFingerVolume(g, mapped, std::array<int, 4>{ 1, 2, 3, 4 }, handIndex == 0, 22.0f, 18.0f, 14.0f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
+        drawFingerVolume(g, mapped, std::array<int, 4>{ 5, 6, 7, 8 }, false,         24.0f, 20.0f, 15.0f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
+        drawFingerVolume(g, mapped, std::array<int, 4>{ 9, 10, 11, 12 }, false,      26.0f, 21.0f, 16.0f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
+        drawFingerVolume(g, mapped, std::array<int, 4>{ 13, 14, 15, 16 }, false,     24.0f, 19.0f, 14.0f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
+        drawFingerVolume(g, mapped, std::array<int, 4>{ 17, 18, 19, 20 }, false,     20.0f, 16.0f, 12.0f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
 
-        for (const auto& connection : handConnections)
-        {
-            const auto start = mapPoint(scene, hand.smoothed[(size_t) connection[0]]);
-            const auto end = mapPoint(scene, hand.smoothed[(size_t) connection[1]]);
-            const auto distance = start.getDistanceFrom(end);
-            const auto thickness = juce::jmap(distance, 10.0f, 140.0f, 7.0f, 14.0f) * hand.visibility;
-
-            g.setColour(baseColour.withAlpha(0.10f * hand.visibility));
-            g.drawLine({ start, end }, thickness + 8.0f);
-
-            g.setColour(baseColour.withAlpha(0.55f * hand.visibility));
-            g.drawLine({ start, end }, thickness);
-
-            g.setColour(juce::Colours::white.withAlpha(0.22f * hand.visibility));
-            g.drawLine({ start, end }, juce::jmax(1.0f, thickness * 0.18f));
-        }
-
-        for (size_t pointIndex = 0; pointIndex < hand.smoothed.size(); ++pointIndex)
-        {
-            const auto mapped = mapPoint(scene, hand.smoothed[pointIndex]);
-            const bool isFingerTip = pointIndex == 4 || pointIndex == 8 || pointIndex == 12
-                                     || pointIndex == 16 || pointIndex == 20;
-            const auto radius = isFingerTip ? 7.0f : 4.2f;
-
-            juce::Colour pointColour = baseColour;
-
-            if (handIndex == 1)
-            {
-                const std::array<int, 4> synthTipIndices { 8, 12, 16, 20 };
-
-                for (size_t i = 0; i < synthTipIndices.size(); ++i)
-                {
-                    if ((int) pointIndex == synthTipIndices[i] && processor.fingerControls[i].isNotEmpty())
-                        pointColour = getParameterColour(processor.fingerControls[i]);
-                }
-            }
-
-            juce::ColourGradient pointGlow(
-                pointColour.withAlpha(isFingerTip ? 0.35f * hand.visibility : 0.22f * hand.visibility),
-                mapped.x, mapped.y,
-                juce::Colours::transparentBlack,
-                mapped.x + radius * 5.0f, mapped.y + radius * 5.0f,
-                true);
-
-            g.setGradientFill(pointGlow);
-            g.fillEllipse(mapped.x - radius * 2.5f, mapped.y - radius * 2.5f, radius * 5.0f, radius * 5.0f);
-
-            g.setColour(pointColour.withAlpha(0.95f * hand.visibility));
-            g.fillEllipse(mapped.x - radius, mapped.y - radius, radius * 2.0f, radius * 2.0f);
-        }
+        drawPalmCreases(g, mapped, outlineColour, highlightColour, hand.visibility);
 
         if (handIndex == 1)
             drawAssignedParameterLabels(g, scene, hand);
+    }
+
+    std::array<juce::Point<float>, 21> mapHand(const juce::Rectangle<float>& scene,
+                                               const VisualHand& hand) const
+    {
+        std::array<juce::Point<float>, 21> mapped {};
+
+        for (size_t i = 0; i < mapped.size(); ++i)
+            mapped[i] = mapPoint(scene, hand.smoothed[i]);
+
+        return mapped;
+    }
+
+    juce::Point<float> pointAlong(juce::Point<float> a, juce::Point<float> b, float amount) const
+    {
+        return { juce::jmap(amount, a.x, b.x), juce::jmap(amount, a.y, b.y) };
+    }
+
+    juce::Point<float> perpendicular(juce::Point<float> from, juce::Point<float> to) const
+    {
+        auto delta = to - from;
+        const auto length = juce::jmax(1.0f, std::sqrt(delta.x * delta.x + delta.y * delta.y));
+        delta /= length;
+        return { -delta.y, delta.x };
+    }
+
+    juce::Path makeSmoothPath(const std::vector<juce::Point<float>>& points, bool closed) const
+    {
+        juce::Path path;
+
+        if (points.empty())
+            return path;
+
+        path.startNewSubPath(points.front());
+
+        if (points.size() == 1)
+            return path;
+
+        for (size_t i = 1; i < points.size() - 1; ++i)
+        {
+            const auto mid = pointAlong(points[i], points[i + 1], 0.5f);
+            path.quadraticTo(points[i], mid);
+        }
+
+        path.lineTo(points.back());
+
+        if (closed)
+            path.closeSubPath();
+
+        return path;
+    }
+
+    juce::Path createPalmFillPath(const std::array<juce::Point<float>, 21>& points) const
+    {
+        const auto wristLeft = points[0] + perpendicular(points[0], points[17]) * 20.0f;
+        const auto wristRight = points[0] - perpendicular(points[0], points[5]) * 20.0f;
+
+        return makeSmoothPath({
+            wristLeft,
+            points[17], pointAlong(points[17], points[13], 0.42f), points[13], points[9], points[5],
+            wristRight,
+            pointAlong(points[0], points[17], 0.45f)
+        }, true);
+    }
+
+    juce::Path createHandOutlinePath(const std::array<juce::Point<float>, 21>& points) const
+    {
+        const auto wristLeft = points[0] + perpendicular(points[0], points[17]) * 22.0f;
+        const auto wristRight = points[0] - perpendicular(points[0], points[5]) * 22.0f;
+
+        return makeSmoothPath({
+            wristLeft,
+            points[17], pointAlong(points[17], points[18], 0.40f), points[20],
+            pointAlong(points[19], points[18], 0.45f), points[17],
+            pointAlong(points[13], points[14], 0.35f), points[16],
+            pointAlong(points[15], points[14], 0.45f), points[13],
+            pointAlong(points[9], points[10], 0.35f), points[12],
+            pointAlong(points[11], points[10], 0.45f), points[9],
+            pointAlong(points[5], points[6], 0.35f), points[8],
+            pointAlong(points[7], points[6], 0.45f), points[5],
+            pointAlong(points[2], points[3], 0.35f), points[4],
+            pointAlong(points[3], points[2], 0.45f), points[1],
+            wristRight,
+            points[0]
+        }, true);
+    }
+
+    void fillSoftStroke(juce::Graphics& g,
+                        juce::Point<float> start,
+                        juce::Point<float> end,
+                        float width,
+                        juce::Colour fill,
+                        juce::Colour shadow,
+                        juce::Colour outline,
+                        juce::Colour highlight) const
+    {
+        g.setColour(shadow);
+        g.drawLine({ start.translated(width * 0.06f, width * 0.10f), end.translated(width * 0.06f, width * 0.10f) }, width + 2.2f);
+
+        g.setColour(fill);
+        g.drawLine({ start, end }, width);
+
+        g.setColour(outline);
+        g.drawLine({ start, end }, juce::jmax(1.0f, width * 0.10f));
+
+        const auto normal = perpendicular(start, end);
+        g.setColour(highlight);
+        g.drawLine({ start - normal * (width * 0.14f), end - normal * (width * 0.14f) }, juce::jmax(1.0f, width * 0.16f));
+    }
+
+    void drawPalmVolume(juce::Graphics& g,
+                        const std::array<juce::Point<float>, 21>& points,
+                        juce::Colour fill,
+                        juce::Colour shadow,
+                        juce::Colour outline,
+                        juce::Colour highlight,
+                        float visibility) const
+    {
+        juce::ignoreUnused(visibility);
+
+        const auto palmPath = createPalmFillPath(points);
+        const auto outlinePath = createHandOutlinePath(points);
+        const auto bounds = palmPath.getBounds();
+
+        juce::ColourGradient palmGradient(
+            highlight.interpolatedWith(fill, 0.65f),
+            bounds.getX() + bounds.getWidth() * 0.18f, bounds.getY() + bounds.getHeight() * 0.08f,
+            shadow.interpolatedWith(fill, 0.45f),
+            bounds.getRight(), bounds.getBottom(),
+            false);
+
+        g.setGradientFill(palmGradient);
+        g.fillPath(palmPath);
+
+        g.setColour(shadow.withAlpha(shadow.getFloatAlpha() * 0.75f));
+        g.fillEllipse(points[1].x - 30.0f, points[1].y - 36.0f, 76.0f, 90.0f);
+
+        g.setColour(outline.withAlpha(0.65f));
+        g.strokePath(outlinePath, juce::PathStrokeType(2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+        g.setColour(highlight.withAlpha(0.40f));
+        g.strokePath(makeSmoothPath({
+            pointAlong(points[5], points[9], 0.35f),
+            pointAlong(points[5], points[9], 0.85f),
+            pointAlong(points[9], points[13], 0.55f)
+        }, false), juce::PathStrokeType(2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
+
+    void drawFingerVolume(juce::Graphics& g,
+                          const std::array<juce::Point<float>, 21>& points,
+                          std::array<int, 4> indices,
+                          bool thumb,
+                          float width0,
+                          float width1,
+                          float width2,
+                          juce::Colour fill,
+                          juce::Colour shadow,
+                          juce::Colour outline,
+                          juce::Colour highlight,
+                          float visibility) const
+    {
+        juce::ignoreUnused(visibility);
+
+        const std::array<float, 3> widths { width0, width1, width2 };
+
+        for (size_t segment = 0; segment < 3; ++segment)
+        {
+            const auto start = points[(size_t) indices[segment]];
+            const auto end = points[(size_t) indices[segment + 1]];
+            const auto blend = (float) segment / 2.0f;
+            const auto segmentFill = fill.interpolatedWith(juce::Colour::fromRGB(148, 255, 176), 0.08f + blend * 0.12f);
+            fillSoftStroke(g, start, end, widths[segment], segmentFill, shadow, outline, highlight);
+        }
+
+    }
+
+    void drawPalmCreases(juce::Graphics& g,
+                         const std::array<juce::Point<float>, 21>& points,
+                         juce::Colour lineColour,
+                         juce::Colour highlight,
+                         float visibility) const
+    {
+        const auto creaseA = makeSmoothPath({
+            pointAlong(points[1], points[5], 0.45f),
+            pointAlong(points[2], points[9], 0.42f),
+            pointAlong(points[3], points[13], 0.38f)
+        }, false);
+
+        const auto creaseB = makeSmoothPath({
+            pointAlong(points[0], points[5], 0.32f),
+            pointAlong(points[0], points[9], 0.46f),
+            pointAlong(points[0], points[13], 0.58f),
+            pointAlong(points[0], points[17], 0.66f)
+        }, false);
+
+        g.setColour(lineColour.withAlpha(0.22f * visibility));
+        g.strokePath(creaseA, juce::PathStrokeType(2.0f));
+        g.strokePath(creaseB, juce::PathStrokeType(1.8f));
+
+        g.setColour(highlight.withAlpha(0.16f * visibility));
+        g.strokePath(creaseA, juce::PathStrokeType(0.8f));
     }
 
     void drawAssignedParameterLabels(juce::Graphics& g,
@@ -1194,24 +1343,7 @@ void CMProjectAudioProcessorEditor::midiOnClickSetUpFunction() {
         };
 }
 void CMProjectAudioProcessorEditor::loadHandiImageFromPath() {
-    //Load hand image from path
-    juce::File imageFile = getHandImageFile();
-    if (imageFile.existsAsFile())
-    {
-        juce::Image handImage = juce::ImageFileFormat::loadFrom(imageFile);
-        handOverlay.setImage(handImage.rescaled(handImage.getWidth() * 2,
-            handImage.getHeight() * 2,
-            juce::Graphics::highResamplingQuality),
-            juce::RectanglePlacement::centred);
-        handOverlay.setAlpha(0.18f);
-        addAndMakeVisible(handOverlay);
-        handOverlay.setInterceptsMouseClicks(false, false);
-    }
-    else
-    {
-        DBG("handimage.png not found at the specified path.");
-    }
-
+    handOverlay.setVisible(false);
 }
 void CMProjectAudioProcessorEditor::addListenerToGLobal() {
     synthPage->startCamera.addListener(this);
