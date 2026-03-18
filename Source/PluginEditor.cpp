@@ -282,11 +282,20 @@ public:
             drawHand(g, scene, (int) handIndex, hands[handIndex]);
         }
 
-        if (! hasVisibleHands)
+        if (! isPythonOn)
         {
             g.setColour(juce::Colours::white.withAlpha(0.35f));
             g.setFont(juce::Font { juce::FontOptions(16.0f) });
             g.drawFittedText("Start camera to render live hand visuals inside the plugin",
+                scene.reduced(24.0f).toNearestInt(),
+                juce::Justification::centredBottom,
+                2);
+        }
+        else if (! hasVisibleHands)
+        {
+            g.setColour(juce::Colours::white.withAlpha(0.28f));
+            g.setFont(juce::Font { juce::FontOptions(15.0f) });
+            g.drawFittedText("Camera active. Move your hand into frame.",
                 scene.reduced(24.0f).toNearestInt(),
                 juce::Justification::centredBottom,
                 2);
@@ -343,18 +352,6 @@ private:
                    .withAlpha(alpha);
     }
 
-    juce::Colour getParameterColour(const juce::String& parameter) const
-    {
-        if (parameter == "GrainPos")     return juce::Colour::fromRGB(84, 240, 255);
-        if (parameter == "GrainDur")     return juce::Colour::fromRGB(255, 192, 92);
-        if (parameter == "GrainDensity") return juce::Colour::fromRGB(108, 255, 140);
-        if (parameter == "GrainPitch")   return juce::Colour::fromRGB(255, 122, 214);
-        if (parameter == "GrainCutOff")  return juce::Colour::fromRGB(120, 168, 255);
-        if (parameter == "GrainReverse") return juce::Colour::fromRGB(244, 250, 255);
-        if (parameter == "lfoRate")      return juce::Colour::fromRGB(196, 134, 255);
-        return juce::Colours::white;
-    }
-
     void drawHand(juce::Graphics& g,
                   const juce::Rectangle<float>& scene,
                   int handIndex,
@@ -382,9 +379,6 @@ private:
         drawFingerVolume(g, mapped, std::array<int, 4>{ 17, 18, 19, 20 }, false,     18.4f, 14.8f, 11.0f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
 
         drawTextureLines(g, mapped, outlineColour, highlightColour, hand.visibility);
-
-        if (handIndex == 1)
-            drawAssignedParameterLabels(g, scene, hand);
     }
 
     std::array<juce::Point<float>, 21> mapHand(const juce::Rectangle<float>& scene,
@@ -739,40 +733,6 @@ private:
 
     }
 
-    void drawAssignedParameterLabels(juce::Graphics& g,
-                                     const juce::Rectangle<float>& scene,
-                                     const VisualHand& hand) const
-    {
-        const std::array<int, 4> tipIndices { 8, 12, 16, 20 };
-
-        for (size_t i = 0; i < tipIndices.size(); ++i)
-        {
-            const auto& parameter = processor.fingerControls[i];
-
-            if (parameter.isEmpty())
-                continue;
-
-            const auto tip = mapPoint(scene, hand.smoothed[(size_t) tipIndices[i]]);
-            const auto labelArea = juce::Rectangle<float>(0.0f, 0.0f, 112.0f, 24.0f)
-                .withCentre({ tip.x + 64.0f, tip.y - 16.0f });
-
-            const auto labelColour = getParameterColour(parameter);
-
-            g.setColour(juce::Colours::black.withAlpha(0.35f * hand.visibility));
-            g.fillRoundedRectangle(labelArea.translated(0.0f, 2.0f), 12.0f);
-
-            g.setColour(labelColour.withAlpha(0.22f * hand.visibility));
-            g.fillRoundedRectangle(labelArea, 12.0f);
-
-            g.setColour(labelColour.withAlpha(0.75f * hand.visibility));
-            g.drawRoundedRectangle(labelArea, 12.0f, 1.0f);
-
-            g.setColour(juce::Colours::white.withAlpha(0.94f * hand.visibility));
-            g.setFont(juce::Font { juce::FontOptions(12.0f) }.boldened());
-            g.drawFittedText(parameter, labelArea.toNearestInt(), juce::Justification::centred, 1);
-        }
-    }
-
     CMProjectAudioProcessor& processor;
     std::array<VisualHand, 2> hands;
     double timeSeconds = 0.0;
@@ -969,6 +929,7 @@ class CMProjectAudioProcessorEditor::SynthPageComponent : public juce::Component
 public:
     juce::TextButton startButton, stopButton, startCamera, stopCamera, loadSampleButton; //StartSynth, StopSynth, StartCamera, StopCamera
     juce::TextButton recordMidiButton{ "Record MIDI" }, stopMidiButton{ "Stop Recording" }, saveMidiButton{ "Save MIDI" }; //Midi buttons
+    juce::TextButton recordAudioButton{ "Rec" }, stopAudioButton{ "Stop" }, saveAudioButton{ "Save Take" }, dragAudioButton{ "Drag Take" };
     HDImageButton grainPos, grainDur, grainDensity, grainReverse, grainCutOff, grainPitch; //Hd images for granulator parameters
     juce::Image startImg, stopImg; //Start and Stop Images
     juce::Label granulatorTitle;
@@ -1014,6 +975,10 @@ public:
         addAndMakeVisible(stopButton);
         addAndMakeVisible(startCamera);
         addAndMakeVisible(stopCamera);
+        addAndMakeVisible(recordAudioButton);
+        addAndMakeVisible(stopAudioButton);
+        addAndMakeVisible(saveAudioButton);
+        addAndMakeVisible(dragAudioButton);
         addAndMakeVisible(loadSampleButton);
         addAndMakeVisible(grainPos);
         addAndMakeVisible(grainDur);
@@ -1074,11 +1039,15 @@ public:
         loadSampleButton.setButtonText("Load Sample");
         loadSampleButton.setLookAndFeel(&loadButtonLookAndFeel);
         resetButton.setLookAndFeel(&loadButtonLookAndFeel);
+        saveAudioButton.setLookAndFeel(&loadButtonLookAndFeel);
+        dragAudioButton.setLookAndFeel(&loadButtonLookAndFeel);
         saveMidiButton.setLookAndFeel(&loadButtonLookAndFeel);
         stopCamera.setEnabled(false);  //only enable once camera is running
         stopButton.setEnabled(false);  //only enable once the sound is being played
         stopMidiButton.setEnabled(false);
         saveMidiButton.setEnabled(false);
+        recordAudioButton.setLookAndFeel(&recordMidiLookAndFeel);
+        stopAudioButton.setLookAndFeel(&stopMidiLookAndFeel);
         recordMidiButton.setLookAndFeel(&recordMidiLookAndFeel);
         stopMidiButton.setLookAndFeel(&stopMidiLookAndFeel);
         startButton.setButtonText("Start Synth");
@@ -1087,6 +1056,22 @@ public:
         stopButton.setLookAndFeel(&stopButtonLookAndFeel);
         startButton.setClickingTogglesState(false);
         stopButton.setClickingTogglesState(false);
+        recordAudioButton.setClickingTogglesState(false);
+        stopAudioButton.setClickingTogglesState(false);
+        refreshAudioCaptureButtons();
+    }
+
+    void refreshAudioCaptureButtons()
+    {
+        const bool isRecording = processor.isAudioRecordingActive();
+        const bool hasTake = processor.hasAudioRecording();
+
+        recordAudioButton.setEnabled(! isRecording);
+        recordAudioButton.setToggleState(isRecording, juce::dontSendNotification);
+        stopAudioButton.setEnabled(isRecording);
+        stopAudioButton.setToggleState(isRecording, juce::dontSendNotification);
+        saveAudioButton.setEnabled(! isRecording && hasTake);
+        dragAudioButton.setEnabled(! isRecording && hasTake);
     }
 
     void granulatorParametersTitle() {
@@ -1310,9 +1295,19 @@ public:
         stopCamera.setBounds(leftControls.removeFromLeft(scaled(50)).withSizeKeepingCentre(scaled(46), scaled(30)));
 
         auto rightControls = topRow.removeFromRight(scaled(200));
+        auto recordingControls = topRow.removeFromRight(scaled(250));
         loadSampleButton.setBounds(rightControls.removeFromLeft(scaled(100)).withSizeKeepingCentre(scaled(100), scaled(30)));
         rightControls.removeFromLeft(scaled(10));
         resetButton.setBounds(rightControls.removeFromLeft(scaled(80)).withSizeKeepingCentre(scaled(80), scaled(30)));
+
+        const int recordGap = scaled(8);
+        stopAudioButton.setBounds(recordingControls.removeFromLeft(scaled(32)).withSizeKeepingCentre(scaled(32), scaled(30)));
+        recordingControls.removeFromLeft(recordGap);
+        recordAudioButton.setBounds(recordingControls.removeFromLeft(scaled(32)).withSizeKeepingCentre(scaled(32), scaled(30)));
+        recordingControls.removeFromLeft(recordGap);
+        saveAudioButton.setBounds(recordingControls.removeFromLeft(scaled(82)).withSizeKeepingCentre(scaled(82), scaled(30)));
+        recordingControls.removeFromLeft(recordGap);
+        dragAudioButton.setBounds(recordingControls.removeFromLeft(scaled(82)).withSizeKeepingCentre(scaled(82), scaled(30)));
 
         area.removeFromTop(scaled(10));
         waveformArea = area.removeFromTop(scaled(110)).withTrimmedLeft(scaled(40)).withTrimmedRight(scaled(40));
@@ -1638,6 +1633,10 @@ void CMProjectAudioProcessorEditor::setToolTipFunction() {
     synthPage->startCamera.setTooltip("Start Camera");
     synthPage->loadSampleButton.setTooltip("Load your sample");
     synthPage->stopCamera.setTooltip("Stop Camera");
+    synthPage->recordAudioButton.setTooltip("Record the plugin output to a WAV take");
+    synthPage->stopAudioButton.setTooltip("Stop audio recording");
+    synthPage->saveAudioButton.setTooltip("Save the last recorded take as WAV");
+    synthPage->dragAudioButton.setTooltip("Drag the last recorded take into the DAW");
 
 }
 void CMProjectAudioProcessorEditor::pluginTitle() {
@@ -1676,6 +1675,81 @@ void CMProjectAudioProcessorEditor::clearFingersSetUp() {
     clearFingersButton.setVisible(false);
 }
 void CMProjectAudioProcessorEditor::midiOnClickSetUpFunction() {
+    synthPage->recordAudioButton.onClick = [this]()
+        {
+            if (audioProcessor.startAudioRecording())
+            {
+                synthPage->refreshAudioCaptureButtons();
+                statusDisplay.showMessage("Recording audio take");
+            }
+            else
+            {
+                statusDisplay.showMessage("Audio engine not ready");
+            }
+        };
+
+    synthPage->stopAudioButton.onClick = [this]()
+        {
+            audioProcessor.stopAudioRecording();
+            synthPage->refreshAudioCaptureButtons();
+            statusDisplay.showMessage(audioProcessor.hasAudioRecording() ? "Take ready" : "No take captured");
+        };
+
+    synthPage->saveAudioButton.onClick = [this]()
+        {
+            if (! audioProcessor.hasAudioRecording())
+            {
+                statusDisplay.showMessage("Record a take first");
+                return;
+            }
+
+            auto chooser = std::make_unique<juce::FileChooser>(
+                "Save recorded take",
+                juce::File::getSpecialLocation(juce::File::userDesktopDirectory).getChildFile("hand-granulator-take.wav"),
+                "*.wav");
+
+            chooser->launchAsync(juce::FileBrowserComponent::saveMode
+                                 | juce::FileBrowserComponent::canSelectFiles
+                                 | juce::FileBrowserComponent::warnAboutOverwriting,
+                                 [this, fc = chooser.get()](const juce::FileChooser&)
+                                 {
+                                     auto targetFile = fc->getResult();
+
+                                     if (targetFile == juce::File())
+                                         return;
+
+                                     if (! targetFile.hasFileExtension("wav"))
+                                         targetFile = targetFile.withFileExtension(".wav");
+
+                                     if (audioProcessor.saveAudioRecording(targetFile))
+                                         statusDisplay.showMessage("Take saved");
+                                     else
+                                         statusDisplay.showMessage("Save failed");
+
+                                     synthPage->refreshAudioCaptureButtons();
+                                 });
+
+            chooser.release();
+        };
+
+    synthPage->dragAudioButton.onClick = [this]()
+        {
+            const auto takeFile = audioProcessor.getLatestAudioRecordingFile();
+
+            if (! takeFile.existsAsFile())
+            {
+                statusDisplay.showMessage("Record a take first");
+                return;
+            }
+
+            const bool dragStarted = juce::DragAndDropContainer::performExternalDragDropOfFiles(
+                { takeFile.getFullPathName() },
+                false,
+                this);
+
+            statusDisplay.showMessage(dragStarted ? "Drag the WAV into the DAW" : "Host drag not supported");
+        };
+
     //Midi on.click setup
     synthPage->recordMidiButton.onClick = [this]()
         {
@@ -1774,6 +1848,126 @@ void CMProjectAudioProcessorEditor::addListenerToGLobal() {
 void CMProjectAudioProcessorEditor::paint(juce::Graphics&) {}
 void CMProjectAudioProcessorEditor::paintOverChildren(juce::Graphics& g)
 {
+    const auto timeSeconds = juce::Time::getMillisecondCounterHiRes() * 0.001;
+    const auto trackedHands = audioProcessor.getTrackedHands();
+    const auto* mappedHand = trackedHands[1].visible ? &trackedHands[1]
+                                                     : (trackedHands[0].visible ? &trackedHands[0] : nullptr);
+
+    const auto getParameterAnchor = [this](const juce::String& parameter) -> juce::Point<float>
+    {
+        auto getBottomAnchor = [this](juce::Component& component)
+        {
+            const auto bounds = getLocalArea(&component, component.getLocalBounds()).toFloat();
+            return juce::Point<float>(bounds.getCentreX(), bounds.getBottom() - 4.0f);
+        };
+
+        if (parameter == "GrainPos")     return getBottomAnchor(synthPage->grainPos);
+        if (parameter == "GrainDur")     return getBottomAnchor(synthPage->grainDur);
+        if (parameter == "GrainDensity") return getBottomAnchor(synthPage->grainDensity);
+        if (parameter == "GrainReverse") return getBottomAnchor(synthPage->grainReverse);
+        if (parameter == "GrainPitch")   return getBottomAnchor(synthPage->grainPitch);
+        if (parameter == "GrainCutOff")  return getBottomAnchor(synthPage->grainCutOff);
+
+        return {};
+    };
+
+    const auto getFallbackFingerAnchor = [this](const CircleButton& button)
+    {
+        return getLocalArea(&button, button.getLocalBounds()).toFloat().getCentre();
+    };
+
+    const auto getTrackedFingerAnchor = [this, mappedHand](int fingerIndex) -> juce::Point<float>
+    {
+        if (mappedHand == nullptr || handVisualizer == nullptr)
+            return {};
+
+        auto scene = getLocalArea(handVisualizer.get(), handVisualizer->getLocalBounds()).toFloat().reduced(18.0f, 10.0f);
+        constexpr float aspect = 16.0f / 9.0f;
+
+        auto width = scene.getWidth();
+        auto height = width / aspect;
+
+        if (height > scene.getHeight())
+        {
+            height = scene.getHeight();
+            width = height * aspect;
+        }
+
+        scene = {
+            scene.getCentreX() - width * 0.5f,
+            scene.getCentreY() - height * 0.5f,
+            width,
+            height
+        };
+
+        constexpr int tipIndices[] { 8, 12, 16, 20 };
+
+        if (! juce::isPositiveAndBelow(fingerIndex, 4))
+            return {};
+
+        const auto point = mappedHand->landmarks[(size_t) tipIndices[fingerIndex]];
+        return {
+            scene.getX() + point.x * scene.getWidth(),
+            scene.getY() + point.y * scene.getHeight()
+        };
+    };
+
+    const auto drawPersistentMapping = [this, &g, timeSeconds, &getParameterAnchor, &getFallbackFingerAnchor, &getTrackedFingerAnchor, mappedHand](int fingerIndex, CircleButton& button)
+    {
+        const auto& parameter = audioProcessor.fingerControls[fingerIndex];
+
+        if (parameter.isEmpty())
+            return;
+
+        const auto start = getParameterAnchor(parameter);
+        const auto accent = getParameterAccentColour(parameter);
+        const auto end = mappedHand != nullptr ? getTrackedFingerAnchor(fingerIndex)
+                                               : getFallbackFingerAnchor(button);
+
+        if (start == juce::Point<float>() || end == juce::Point<float>())
+            return;
+
+        const auto verticalSpan = juce::jmax(42.0f, (end.y - start.y) * 0.42f);
+        const float pulse = 0.68f + 0.32f * static_cast<float>(std::sin(timeSeconds * 4.6 + fingerIndex * 0.55));
+
+        juce::Path cable;
+        cable.startNewSubPath(start);
+        cable.cubicTo(start.x, start.y + verticalSpan,
+                      end.x, end.y - juce::jmax(28.0f, verticalSpan * 0.52f),
+                      end.x, end.y);
+
+        g.setColour(juce::Colours::black.withAlpha(0.28f));
+        g.strokePath(cable, juce::PathStrokeType(8.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+        g.setColour(accent.withAlpha(0.16f * pulse));
+        g.strokePath(cable, juce::PathStrokeType(6.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+        g.setColour(accent.withAlpha(0.82f));
+        g.strokePath(cable, juce::PathStrokeType(2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+        g.setColour(accent.withAlpha(0.94f));
+        g.fillEllipse(juce::Rectangle<float>(0.0f, 0.0f, 7.0f, 7.0f).withCentre(start));
+
+        if (mappedHand != nullptr)
+        {
+            auto halo = juce::Rectangle<float>(0.0f, 0.0f, 22.0f, 22.0f).withCentre(end);
+            auto ring = juce::Rectangle<float>(0.0f, 0.0f, 13.0f, 13.0f).withCentre(end);
+            auto core = juce::Rectangle<float>(0.0f, 0.0f, 6.0f, 6.0f).withCentre(end);
+
+            g.setColour(accent.withAlpha(0.14f * pulse));
+            g.fillEllipse(halo);
+            g.setColour(accent.withAlpha(0.94f));
+            g.drawEllipse(ring, 1.8f);
+            g.setColour(juce::Colours::white.withAlpha(0.96f));
+            g.fillEllipse(core);
+        }
+    };
+
+    drawPersistentMapping(0, indexButton);
+    drawPersistentMapping(1, middleButton);
+    drawPersistentMapping(2, ringButton);
+    drawPersistentMapping(3, pinkyButton);
+
     if (! isParameterDragActive || draggedParameter.isEmpty())
         return;
 
@@ -1914,7 +2108,7 @@ juce::Colour CMProjectAudioProcessorEditor::getParameterAccentColour(const juce:
 {
     if (parameter == "GrainPos")     return juce::Colour::fromRGB(84, 240, 255);
     if (parameter == "GrainDur")     return juce::Colour::fromRGB(255, 192, 92);
-    if (parameter == "GrainDensity") return juce::Colour::fromRGB(108, 255, 140);
+    if (parameter == "GrainDensity") return juce::Colour::fromRGB(255, 96, 96);
     if (parameter == "GrainPitch")   return juce::Colour::fromRGB(255, 122, 214);
     if (parameter == "GrainCutOff")  return juce::Colour::fromRGB(120, 168, 255);
     if (parameter == "GrainReverse") return juce::Colour::fromRGB(244, 250, 255);

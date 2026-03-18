@@ -55,6 +55,12 @@ public:
     void startMidiRecording() noexcept { recordedSequence.clear(); isRecordingMidi = true; }
     void stopMidiRecording() noexcept { isRecordingMidi = false; }
     bool saveMidiRecording(const juce::File& file);
+    bool startAudioRecording();
+    void stopAudioRecording();
+    bool saveAudioRecording(const juce::File& file);
+    bool isAudioRecordingActive() const noexcept { return isRecordingAudio.load(); }
+    bool hasAudioRecording() const;
+    juce::File getLatestAudioRecordingFile() const;
 
     juce::String fingerControls[4] = { {}, {}, {}, {} };
     juce::String fingerDrumMapping[4] = { {}, {}, {}, {} }; // default R-idx,R-mid,L-idx,L-mid
@@ -104,6 +110,13 @@ private:
     
     bool isRecordingMidi = false;
     juce::MidiMessageSequence recordedSequence;
+    juce::TimeSliceThread audioRecordingThread { "HandGranulator Audio Recorder" };
+    juce::CriticalSection audioRecordingLock;
+    std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> threadedAudioWriter;
+    std::atomic<juce::AudioFormatWriter::ThreadedWriter*> activeAudioWriter { nullptr };
+    juce::File currentAudioRecordingFile;
+    juce::File latestAudioRecordingFile;
+    std::atomic<bool> isRecordingAudio { false };
 
     juce::AudioFormatManager formatManager;
     std::array<juce::AudioBuffer<float>, 4> drumSamples;

@@ -25,11 +25,14 @@ CMProjectAudioProcessor::CMProjectAudioProcessor()
 
 {
     formatManager.registerBasicFormats();
+    audioRecordingThread.startThread();
     updateParameters();
 }
 
 CMProjectAudioProcessor::~CMProjectAudioProcessor()
 {
+    stopAudioRecording();
+    audioRecordingThread.stopThread(2000);
 }
 
 //==============================================================================
@@ -400,6 +403,13 @@ void CMProjectAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juc
             }
         }
     }
+
+    {
+        const juce::ScopedLock lock(audioRecordingLock);
+
+        if (auto* writer = activeAudioWriter.load())
+            writer->write(buffer.getArrayOfReadPointers(), buffer.getNumSamples());
+    }
 }
 
 
@@ -483,6 +493,95 @@ bool CMProjectAudioProcessor::saveMidiRecording(const juce::File& file)
     return false;
 }
 
+bool CMProjectAudioProcessor::startAudioRecording()
+{
+    if (currentSampleRate <= 0.0 || getTotalNumOutputChannels() <= 0)
+        return false;
+
+    stopAudioRecording();
+
+    auto tempFile = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                        .getNonexistentChildFile("hand-granulator-take", ".wav");
+
+    auto fileStream = std::unique_ptr<juce::FileOutputStream>(tempFile.createOutputStream());
+
+    if (fileStream == nullptr)
+        return false;
+
+    juce::WavAudioFormat wavFormat;
+    auto* writer = wavFormat.createWriterFor(fileStream.get(),
+                                             currentSampleRate,
+                                             (unsigned int) juce::jmax(1, getTotalNumOutputChannels()),
+                                             24,
+                                             {},
+                                             0);
+
+    if (writer == nullptr)
+        return false;
+
+    fileStream.release();
+
+    auto nextThreadedWriter = std::make_unique<juce::AudioFormatWriter::ThreadedWriter>(writer,
+                                                                                         audioRecordingThread,
+                                                                                         32768);
+
+    {
+        const juce::ScopedLock lock(audioRecordingLock);
+        currentAudioRecordingFile = tempFile;
+        latestAudioRecordingFile = juce::File();
+        threadedAudioWriter = std::move(nextThreadedWriter);
+        activeAudioWriter.store(threadedAudioWriter.get());
+        isRecordingAudio.store(true);
+    }
+
+    return true;
+}
+
+void CMProjectAudioProcessor::stopAudioRecording()
+{
+    const juce::ScopedLock lock(audioRecordingLock);
+
+    activeAudioWriter.store(nullptr);
+    threadedAudioWriter.reset();
+    isRecordingAudio.store(false);
+
+    if (currentAudioRecordingFile.existsAsFile())
+        latestAudioRecordingFile = currentAudioRecordingFile;
+
+    currentAudioRecordingFile = juce::File();
+}
+
+bool CMProjectAudioProcessor::saveAudioRecording(const juce::File& file)
+{
+    const auto source = getLatestAudioRecordingFile();
+
+    if (! source.existsAsFile())
+        return false;
+
+    if (file == source)
+        return true;
+
+    if (! file.getParentDirectory().isDirectory() && ! file.getParentDirectory().createDirectory())
+        return false;
+
+    if (file.existsAsFile() && ! file.deleteFile())
+        return false;
+
+    return source.copyFileTo(file);
+}
+
+bool CMProjectAudioProcessor::hasAudioRecording() const
+{
+    const juce::ScopedLock lock(audioRecordingLock);
+    return latestAudioRecordingFile.existsAsFile();
+}
+
+juce::File CMProjectAudioProcessor::getLatestAudioRecordingFile() const
+{
+    const juce::ScopedLock lock(audioRecordingLock);
+    return latestAudioRecordingFile;
+}
+
 void CMProjectAudioProcessor::loadSynthSample(const juce::File& file)
 {
     std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(file));
@@ -541,5 +640,3 @@ void CMProjectAudioProcessor::spawnGrain()
 
     activeGrains.push_back(grain);
 }
-
-
