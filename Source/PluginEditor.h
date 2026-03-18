@@ -522,7 +522,8 @@ private:
     {
         void drawButtonText(juce::Graphics& g, juce::TextButton& button, bool, bool) override
         {
-            auto bounds = button.getLocalBounds().toFloat().reduced(8.0f);
+            auto bounds = button.getLocalBounds().toFloat().reduced(button.getHeight() * 0.18f,
+                                                                    button.getHeight() * 0.22f);
 
             // Shrink triangle height to 60% and center it vertically
             float triangleHeight = bounds.getHeight() * 0.85f;
@@ -559,7 +560,8 @@ private:
     {
         void drawButtonText(juce::Graphics& g, juce::TextButton& button, bool, bool) override
         {
-            auto bounds = button.getLocalBounds().toFloat().reduced(8.0f);
+            auto bounds = button.getLocalBounds().toFloat().reduced(button.getHeight() * 0.18f,
+                                                                    button.getHeight() * 0.22f);
             g.setColour(juce::Colours::white.withAlpha(0.85f));
 
             float barWidth = bounds.getWidth() * 0.2f;
@@ -584,24 +586,29 @@ private:
     {
         void drawButtonText(juce::Graphics& g, juce::TextButton& button, bool, bool) override
         {
-            auto bounds = button.getLocalBounds().toFloat().reduced(8.0f);
+            auto bounds = button.getLocalBounds().toFloat().reduced(button.getHeight() * 0.18f,
+                                                                    button.getHeight() * 0.22f);
             g.setColour(juce::Colours::white.withAlpha(0.85f));
 
-            //Camera body on the left
-            juce::Rectangle<float> body(bounds.getX(), bounds.getCentreY() - 8.0f, 22.0f, 16.0f);
-            g.fillRoundedRectangle(body, 4.0f);
+            const float iconHeight = juce::jlimit(10.0f, bounds.getHeight(), bounds.getHeight() * 0.58f);
+            const float bodyWidth = iconHeight * 1.35f;
+            const float lensWidth = iconHeight * 0.48f;
+            const float taper = iconHeight * 0.22f;
+            const float iconWidth = bodyWidth + lensWidth;
+            const float iconX = bounds.getCentreX() - iconWidth * 0.5f;
+            const float iconY = bounds.getCentreY() - iconHeight * 0.5f;
 
-            //Corrected trapezoid: small side near rectangle, large side outside
+            juce::Rectangle<float> body(iconX, iconY, bodyWidth, iconHeight);
+            g.fillRoundedRectangle(body, iconHeight * 0.24f);
+
             juce::Path lens;
-            float lensHeight = 12.0f;
-            float taper = 4.0f;
-            float baseX = body.getRight();      //right of the camera body
-            float centerY = body.getCentreY();
+            const float baseX = body.getRight();
+            const float centerY = body.getCentreY();
 
-            lens.startNewSubPath(baseX, centerY - lensHeight / 2 + taper);     // top-left (narrow base)
-            lens.lineTo(baseX + 8.0f, centerY - lensHeight / 2);      // top-right
-            lens.lineTo(baseX + 8.0f, centerY + lensHeight / 2);     // bottom-right
-            lens.lineTo(baseX, centerY + lensHeight / 2 - taper);    // bottom-left
+            lens.startNewSubPath(baseX, centerY - iconHeight * 0.5f + taper);
+            lens.lineTo(baseX + lensWidth, centerY - iconHeight * 0.5f);
+            lens.lineTo(baseX + lensWidth, centerY + iconHeight * 0.5f);
+            lens.lineTo(baseX, centerY + iconHeight * 0.5f - taper);
             lens.closeSubPath();
             g.fillPath(lens);
         }
@@ -611,30 +618,37 @@ private:
     {
         void drawButtonText(juce::Graphics& g, juce::TextButton& button, bool, bool) override
         {
-            auto bounds = button.getLocalBounds().toFloat().reduced(8.0f);
+            auto bounds = button.getLocalBounds().toFloat().reduced(button.getHeight() * 0.18f,
+                                                                    button.getHeight() * 0.22f);
             g.setColour(juce::Colours::white.withAlpha(0.85f));
 
             // Camera body
-            juce::Rectangle<float> body(bounds.getX(), bounds.getCentreY() - 8.0f, 22.0f, 16.0f);
-            g.fillRoundedRectangle(body, 4.0f);
+            const float iconHeight = juce::jlimit(10.0f, bounds.getHeight(), bounds.getHeight() * 0.58f);
+            const float bodyWidth = iconHeight * 1.35f;
+            const float lensWidth = iconHeight * 0.48f;
+            const float taper = iconHeight * 0.22f;
+            const float iconWidth = bodyWidth + lensWidth;
+            const float iconX = bounds.getCentreX() - iconWidth * 0.5f;
+            const float iconY = bounds.getCentreY() - iconHeight * 0.5f;
+
+            juce::Rectangle<float> body(iconX, iconY, bodyWidth, iconHeight);
+            g.fillRoundedRectangle(body, iconHeight * 0.24f);
 
             // Lens (trapezoid, flipped horizontally)
             juce::Path lens;
-            float lensHeight = 12.0f;
-            float taper = 4.0f;
-            float baseX = body.getRight();
-            float centerY = body.getCentreY();
+            const float baseX = body.getRight();
+            const float centerY = body.getCentreY();
 
-            lens.startNewSubPath(baseX, centerY - lensHeight / 2 + taper);       // top-left (narrow base)
-            lens.lineTo(baseX + 8.0f, centerY - lensHeight / 2);                 // top-right
-            lens.lineTo(baseX + 8.0f, centerY + lensHeight / 2);                 // bottom-right
-            lens.lineTo(baseX, centerY + lensHeight / 2 - taper);               // bottom-left
+            lens.startNewSubPath(baseX, centerY - iconHeight * 0.5f + taper);
+            lens.lineTo(baseX + lensWidth, centerY - iconHeight * 0.5f);
+            lens.lineTo(baseX + lensWidth, centerY + iconHeight * 0.5f);
+            lens.lineTo(baseX, centerY + iconHeight * 0.5f - taper);
             lens.closeSubPath();
             g.fillPath(lens);
 
             // Oblique "disabled" line (white core + blackish border)
             juce::Path slash;
-            float lineWidth = 2.5f;
+            const float lineWidth = juce::jmax(1.4f, iconHeight * 0.16f);
             float borderWidth = 6.5f; // ⬅️ thicker border
 
             slash.startNewSubPath(bounds.getX() + 2.0f, bounds.getBottom() - 2.0f);
