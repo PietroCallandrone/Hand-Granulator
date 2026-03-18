@@ -361,6 +361,7 @@ private:
         shortenFinger(mapped, std::array<int, 4>{ 9, 10, 11, 12 }, 0.905f);
         shortenFinger(mapped, std::array<int, 4>{ 13, 14, 15, 16 }, 0.900f);
         shortenFinger(mapped, std::array<int, 4>{ 17, 18, 19, 20 }, 0.885f);
+        applyPinchClosure(mapped);
 
         const auto baseColour = getHandColour(handIndex, 0.98f * hand.visibility);
         const auto shadowColour = juce::Colour::fromRGB(0, 0, 0).withAlpha(0.42f * hand.visibility);
@@ -374,7 +375,6 @@ private:
         drawFingerVolume(g, mapped, std::array<int, 4>{ 9, 10, 11, 12 }, false,      24.0f, 19.4f, 14.6f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
         drawFingerVolume(g, mapped, std::array<int, 4>{ 13, 14, 15, 16 }, false,     22.0f, 17.6f, 13.2f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
         drawFingerVolume(g, mapped, std::array<int, 4>{ 17, 18, 19, 20 }, false,     18.4f, 14.8f, 11.0f, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
-        drawPinchConnectors(g, mapped, baseColour, shadowColour, outlineColour, highlightColour, hand.visibility);
 
         drawPalmCreases(g, mapped, outlineColour, highlightColour, hand.visibility);
 
@@ -406,6 +406,32 @@ private:
 
         for (size_t i = 1; i < indices.size(); ++i)
             points[(size_t) indices[i]] = pointAlong(base, points[(size_t) indices[i]], scale);
+    }
+
+    void applyPinchClosure(std::array<juce::Point<float>, 21>& points) const
+    {
+        const std::array<int, 4> otherTips { 8, 12, 16, 20 };
+        const std::array<int, 4> otherNearTips { 7, 11, 15, 19 };
+        constexpr float threshold = 54.0f;
+
+        for (size_t i = 0; i < otherTips.size(); ++i)
+        {
+            const auto thumbTip = points[4];
+            const auto otherTip = points[(size_t) otherTips[i]];
+            const auto distance = thumbTip.getDistanceFrom(otherTip);
+
+            if (distance >= threshold)
+                continue;
+
+            const auto t = juce::jlimit(0.0f, 1.0f, 1.0f - (distance / threshold));
+            const auto pinchMid = pointAlong(thumbTip, otherTip, 0.5f);
+
+            points[4] = pointAlong(thumbTip, pinchMid, 0.34f * t);
+            points[(size_t) otherTips[i]] = pointAlong(otherTip, pinchMid, 0.34f * t);
+
+            points[3] = pointAlong(points[3], pinchMid, 0.12f * t);
+            points[(size_t) otherNearTips[i]] = pointAlong(points[(size_t) otherNearTips[i]], pinchMid, 0.10f * t);
+        }
     }
 
     juce::Point<float> perpendicular(juce::Point<float> from, juce::Point<float> to) const
@@ -636,44 +662,6 @@ private:
 
             g.setColour(highlight.withAlpha(0.10f));
             g.drawLine({ mid + normal * (halfWidth * 0.55f), mid - normal * (halfWidth * 0.55f) }, 1.0f);
-        }
-    }
-
-    void drawPinchConnectors(juce::Graphics& g,
-                             const std::array<juce::Point<float>, 21>& points,
-                             juce::Colour fill,
-                             juce::Colour shadow,
-                             juce::Colour outline,
-                             juce::Colour highlight,
-                             float visibility) const
-    {
-        const auto thumbTip = points[4];
-        const std::array<int, 4> otherTips { 8, 12, 16, 20 };
-        const std::array<float, 4> widths { 12.0f, 13.0f, 11.0f, 9.0f };
-
-        for (size_t i = 0; i < otherTips.size(); ++i)
-        {
-            const auto otherTip = points[(size_t) otherTips[i]];
-            const auto distance = thumbTip.getDistanceFrom(otherTip);
-            const float threshold = 58.0f;
-
-            if (distance >= threshold)
-                continue;
-
-            const auto t = juce::jlimit(0.0f, 1.0f, 1.0f - (distance / threshold));
-            const auto connectorWidth = juce::jmap(t, widths[i] * 0.55f, widths[i] * 1.05f);
-            const auto start = pointAlong(thumbTip, otherTip, 0.18f);
-            const auto end = pointAlong(thumbTip, otherTip, 0.82f);
-
-            fillSoftStroke(
-                g,
-                start,
-                end,
-                connectorWidth,
-                fill.interpolatedWith(juce::Colour::fromRGB(148, 255, 176), 0.10f).withAlpha(0.95f * visibility),
-                shadow.withAlpha((0.20f + 0.18f * t) * visibility),
-                outline.withAlpha((0.55f + 0.20f * t) * visibility),
-                highlight.withAlpha((0.12f + 0.10f * t) * visibility));
         }
     }
 
